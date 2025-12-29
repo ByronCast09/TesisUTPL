@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [react(),tagger()],
+  plugins: [react(), tagger()],
   build: {
     outDir: "build",
   },
@@ -22,9 +22,15 @@ export default defineConfig({
     },
   },
   server: {
-    port: "4028",
+    port: "4029",
     host: "0.0.0.0",
     strictPort: true,
-    allowedHosts: ['.amazonaws.com', '.builtwithrocket.new']
+    allowedHosts: ['.amazonaws.com', '.builtwithrocket.new'],
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true
+      }
+    }
   }
 });

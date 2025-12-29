@@ -1,0 +1,35 @@
+{
+  "radar": "LGUAXX",
+  "dataset": "Band1",
+  "shape": [
+    1002,
+    999
+  ],
+  "timestamp": "2025-12-15T21:33:26.450071",
+  "sourceTimestamp": "2025-12-14T18:40:04+00:00",
+  "date": "2025-12-14",
+  "sourceFile": "C:\\Users\\Usuario iTC\\Desktop\\TesisUTPL\\tesis_utpl\\backend\\storage\\raw\\LGUAXX\\2025\\12\\14\\2025121418400000dBuZ.ppi_top.nc4",
+  "vmin": 0.0,
+  "vmax": 60.0,
+  "transparentBelow": 0.0,
+  "cmap": "turbo",
+  "bounds": {
+    "southWest": [
+      -4.944622200903552,
+      -80.77070954495004
+    ],
+    "northEast": [
+      -3.1361047112935703,
+      -78.96761218767655
+    ]
+  },
+  "stats": {
+    "min": 0.0,
+    "max": 130.0,
+    "mean": 0.022516528144478798,
+    "std": 1.5864299535751343,
+    "validCount": 1000998,
+    "totalCount": 1000998
+  },
+  "png": "C:\\Users\\Usuario iTC\\Desktop\\TesisUTPL\\tesis_utpl\\backend\\public\\radar-images\\LGUAXX\\2025-12-14\\LGUAXX_20251214_184004.png"
+}

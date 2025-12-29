@@ -1,0 +1,200 @@
+.leaflet-image-layer.radar-overlay {
+  mix-blend-mode: normal;
+  /* asegurar que los colores se vean tal cual */
+  pointer-events: none;
+  /* no bloquear interacción del mapa */
+}
+
+.overlay-control {
+  background: rgba(255, 255, 255, 0.85);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  color: #1f2937;
+}
+
+.overlay-control label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.overlay-control input[type="range"] {
+  width: 140px;
+  accent-color: #2563eb;
+}
+
+.playback-glass {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(18px);
+  border-radius: 18px;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 12px 38px rgba(15, 23, 42, 0.18);
+  min-width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  color: #111827;
+  pointer-events: auto;
+  z-index: 1000;
+  font-size: 12px;
+}
+
+.playback-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+}
+
+.playback-title {
+  font-size: 13px;
+}
+
+.playback-meta {
+  font-size: 11px;
+  color: #4f46e5;
+  font-weight: 700;
+}
+
+.playback-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.playback-buttons button {
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  padding: 0.35rem 0.85rem;
+  background: rgba(255, 255, 255, 0.88);
+  font-size: 12px;
+  font-weight: 600;
+  color: #1f2937;
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.playback-buttons button:hover {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #1d4ed8;
+}
+
+.playback-buttons button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: rgba(148, 163, 184, 0.25);
+  border-color: rgba(148, 163, 184, 0.3);
+  color: #6b7280;
+}
+
+.playback-speed label {
+  display: block;
+  font-size: 11px;
+  color: #475569;
+  margin-bottom: 0.25rem;
+}
+
+.playback-speed input[type="range"] {
+  width: 100%;
+  accent-color: #2563eb;
+}
+
+.playback-speed input[type="range"]:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.playback-range {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.playback-range-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.playback-range-header button {
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  font-size: 11px;
+  cursor: pointer;
+  font-weight: 600;
+  padding: 0;
+}
+
+.playback-range-header button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.playback-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.playback-range-inputs input {
+  flex: 1;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  padding: 0.25rem 0.45rem;
+  color: #1f2937;
+}
+
+.playback-range-inputs input:disabled {
+  background: rgba(226, 232, 240, 0.6);
+  cursor: not-allowed;
+  color: #94a3b8;
+}
+
+.playback-range-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.playback-range-buttons button {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 999px;
+  padding: 0.25rem 0.65rem;
+  background: rgba(255, 255, 255, 0.88);
+  font-size: 11px;
+  color: #1f2937;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.playback-range-buttons button:hover {
+  background: rgba(37, 99, 235, 0.18);
+  border-color: rgba(37, 99, 235, 0.35);
+  color: #1d4ed8;
+}
+
+.playback-range-buttons button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: rgba(148, 163, 184, 0.25);
+  background: rgba(226, 232, 240, 0.5);
+  color: #94a3b8;
+}
+
+.playback-warning {
+  font-size: 11px;
+  color: #ef4444;
+}

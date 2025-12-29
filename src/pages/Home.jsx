@@ -50,7 +50,7 @@ const Home = () => {
     <div className="w-full bg-global-2">
       {/* Hero Section with Background */}
       <section 
-        className="w-full bg-cover bg-center bg-no-repeat relative"
+        className="w-full bg-cover bg-center bg-no-repeat relative rounded-b-[40px] sm:rounded-b-[50px] lg:rounded-b-[60px] overflow-hidden"
         style={{
           backgroundImage: "url('/images/img_geminigeneratedimage8xcgau8xcgau8xcg_1.png')"
         }}
@@ -60,8 +60,8 @@ const Home = () => {
           <Header />
           
           {/* Hero Content */}
-          <div className="px-4 sm:px-6 lg:px-[66px] pb-8 sm:pb-12 lg:pb-16">
-            <div className="flex flex-col lg:flex-row justify-center items-start w-full">
+          <div className="px-4 sm:px-6 lg:px-[66px] pb-8 sm:pb-12 lg:pb-16 pt-12 sm:pt-16 lg:pt-24">
+            <div className="flex flex-col lg:flex-row justify-start items-start w-full">
               <div className="w-full lg:w-1/2 max-w-[650px]">
                 {/* Content Card */}
                 <div className="bg-global-3 rounded-[10px] p-4 sm:p-6 lg:p-[16px] mb-6 lg:mb-0">
@@ -95,7 +95,7 @@ const Home = () => {
       </section>
 
       {/* What is it Section */}
-      <section className="w-full">
+      <section className="w-full bg-global-3 rounded-b-[40px] sm:rounded-b-[50px] lg:rounded-b-[60px]">
         <div className="w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-[96px] py-8 sm:py-12 lg:py-[72px]">
           <h2 className="text-[20px] sm:text-[22px] lg:text-[24px] font-montserrat font-semibold leading-[25px] sm:leading-[28px] lg:leading-[30px] text-global-2 mb-6 sm:mb-8 lg:mb-[30px]">
             ¿Qué es?
@@ -133,13 +133,18 @@ const Home = () => {
               </div>
 
               {/* TIC Tools */}
-              <div className="flex flex-col gap-6 sm:gap-7 lg:gap-[30px] w-full lg:w-[24%]">
+              <div className="flex flex-col gap-6 sm:gap-7 lg:gap-[30px]">
                 <h3 className="text-[20px] sm:text-[22px] lg:text-[24px] font-montserrat font-semibold leading-[25px] sm:leading-[28px] lg:leading-[30px] text-global-2">
                   Herramientas TIC
                 </h3>
-                <p className="text-[14px] sm:text-[15px] lg:text-[16px] font-montserrat font-normal leading-[20px] sm:leading-[22px] lg:leading-[24px] text-global-1 w-full">
-                  12 estaciones meteorológicas de UTPL, 40 estaciones del INAMHI y 30 del Gobierno Provincial de Loja; radar meteorológico GUAXX y LOXX, sensores y visor en plataforma web.
-                </p>
+                <div className="text-[14px] sm:text-[15px] lg:text-[16px] font-montserrat font-normal leading-[20px] sm:leading-[22px] lg:leading-[24px] text-global-1 w-full">
+                  <p>- 12 estaciones meteorológicas de UTPL</p>
+                  <p>- 40 estaciones del INAMHI</p>
+                  <p>- 30 del Gobierno Provincial de Loja</p>
+                  <p>- radar meteorológico GUAXX y LOXX</p>
+                  <p>- sensores</p>
+                  <p>- visor en plataforma web</p>
+                </div>
               </div>
             </div>
           </div>

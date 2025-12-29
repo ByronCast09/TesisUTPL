@@ -1,0 +1,13 @@
+npm {
+  "type": "service_account",
+  "project_id": "radartesis",
+  "private_key_id": "f69d0eb07146f753da200e5183730d6a144be791",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQCoAtLppCw6wJG5\nRJdBeXdxK9vo3wsclzGAo0P8plTeUJ3nX+eP9UcqLiqhLILH52SqA3fE6Nd31/oC\nuGE4Wm3r2I2VQ85/kAYaHTEfdEKFZb6lq2U4e31woWviaOoEZ2X8M0Zccc5LToto\nN9v4yYWIvIisl9WBrtPxOW8osG5ZPDRXlowU169LumeNYXm9ExQfpVPdY92bpXT+\ne7tX3ZUHzxmOKTyygNJdnJI5QO7Yhua9dLdj7sPw+b/ZXPj9O/54kVivY+JgmyGl\n6gzgF4Yocttt7P/jcLmW1MLP7juso2lq5Af+kG/sJhv91Y8eP2BCkluCTRh5ZqAu\ny/Kq1l1FAgMBAAECggEAH1FRb+Bcp0H8l+iXekqyT0vx5NVovJZZUaV9V5PIt50W\n5gl8QFsj/hKXey4xHaK+IqvdUDzn5yzA629jne3LVh5qe+OlEyWtYYJGBRs2iCeo\nUzjg+Bea0Rsh4VUVpCcC/XEwYSyMnACC33UkIZqs88lS/7sYvyDv3GQMmqzSkPro\nvtDEgIz4vNn0zHm3vp707usOeb894iMNwoF2sh01hutxSFrQw+1AgkLFwr3tpbp/\nWA2cghQn2GQxuIn6ldbqAiRUi55mXAXNYMdER5LoVem4vRbEZeOWpysPfjoJJixD\nNx31RIlO/+mqHDWTXN7v7zTAaCdBbC0xDc9dTGJc6QKBgQDcm7T3DGJqRRmHfpCa\nmMs5LDyW6I6fNPKbruWALilXu+lp6DSf2/CQGGYdy9puMqlJWztQEyBCklTeF3CR\nBfAck9t0hbLYINXcQUc5atkQpVhWedtCUETAVGZNZCurfVckj7Gvbcx9yKxeDvdE\nVmcAfe5R5l5uImmtaug4R4AnbQKBgQDC9viBmw3fmUsTAKpMTv1J3d9EB8nAhzEW\nkCmQ/ZV2ihwtWvFLPKC7PKF1mGcbecxNyaQ6q7mJGJv727HdILsns20U/vV0od8M\ndG2pAqTTAnygIF1BMGhqDFMbrWnhnpRqoaNiJcj1cJAYjwICdAQiN99K6g6UTmow\n1KfkXhguOQKBgGsm1gcI5ORpG7VMLEBq5oqmiedinaOGvDASCzbvNPWAOCdQuf7L\nfVUABNmEIlxUDxWqUmzaXVj4anBVQj+ueqnmxzkZl3yStk19B3NECpqjNP0Lwwu6\noSop1GbSuMNa5fDEOrHSyvhteAtXiZKPxQfgItl043jrDhlFS/XKBN0hAoGBAKho\ncOxzJR656XF2p6PWr0+5CXxYRdu6a5qT2HPXt913GzPKVJeqvSQ/ETDk/ltrcCDZ\nRrUvVMqpqUN62D6sYT2/7T+vpBKlKGg3wem10O48Pa6LhkIjMG46SyejOcycEJOz\nH9BN1zK7kpzEGvZHhLKSFJ0/ZGyS94NKjePjq3txAoGBAMj+nav0u+5RtCigGGqi\ntpUO+AMoJ+gce+sQ2W6xRHVpEJLlPSYM5LDezlsTmqI3HRA+D24qRixYzE+7YeKR\nQy6epx+ZnVtsIJCfJrSnY0d3LLJO/9hFEFODG8xaFT5qE7UCrSAgJEIXUIWqgLXo\nIN/aL8rs7xRiZcafF277Udpo\n-----END PRIVATE KEY-----\n",
+  "client_email": "firebase-adminsdk-fbsvc@radartesis.iam.gserviceaccount.com",
+  "client_id": "114590665500773360360",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40radartesis.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import Button from './ui/Button';
 
 const Header = () => {
@@ -28,31 +29,35 @@ const Header = () => {
 
           {/* Navigation Menu */}
           <nav className={`${menuOpen ? 'block' : 'hidden'} lg:block w-full lg:w-auto mt-4 lg:mt-0`}>
-            <div className="flex flex-col lg:flex-row justify-between items-center lg:w-[40%] space-y-4 lg:space-y-0">
-              <a 
-                href="/" 
+            <div className="flex flex-col lg:flex-row justify-between items-center lg:w-[40%] space-y-4 lg:space-y-0 lg:space-x-12">
+              <Link 
+                to="/" 
                 className="text-[14px] lg:text-[16px] font-poppins font-medium leading-[21px] lg:leading-[24px] text-global-1 hover:text-global-5 transition-colors"
+                onClick={() => setMenuOpen(false)}
               >
                 Inicio
-              </a>
-              <a 
-                href="/visor" 
+              </Link>
+              <Link 
+                to="/visor" 
                 className="text-[14px] lg:text-[16px] font-poppins font-medium leading-[21px] lg:leading-[24px] text-global-1 hover:text-global-5 transition-colors"
+                onClick={() => setMenuOpen(false)}
               >
                 Visor
-              </a>
+              </Link>
               <a 
                 href="#contacto" 
                 className="text-[14px] lg:text-[16px] font-poppins font-medium leading-[21px] lg:leading-[24px] text-global-1 hover:text-global-5 transition-colors"
+                onClick={() => setMenuOpen(false)}
               >
                 Contacto
               </a>
-              <a 
-                href="#equipo" 
+              <Link 
+                to="/equipo" 
                 className="text-[14px] lg:text-[16px] font-poppins font-medium leading-[21px] lg:leading-[24px] text-global-1 hover:text-global-5 transition-colors"
+                onClick={() => setMenuOpen(false)}
               >
                 Equipo
-              </a>
+              </Link>
             </div>
           </nav>
 

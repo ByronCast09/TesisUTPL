@@ -1,0 +1,78 @@
+{
+  "timestamp": "2025-12-28T21:54:44.923Z",
+  "security": {
+    "envVars": {
+      "hasDBPassword": true,
+      "hasFirebaseKey": true,
+      "hasRemotePassword": true,
+      "nodeEnv": "development"
+    },
+    "cors": {
+      "enabled": true,
+      "message": "CORS habilitado - permite peticiones desde cualquier origen"
+    },
+    "rateLimit": {
+      "enabled": true,
+      "maxRequests": 100,
+      "window": 15
+    },
+    "compression": {
+      "enabled": true,
+      "level": 6
+    }
+  },
+  "database": {
+    "pool": {
+      "configured": true,
+      "max": 50,
+      "total": 0,
+      "idle": 0,
+      "waiting": 0
+    },
+    "size": {
+      "db_size": "1578 MB",
+      "table_size": "1570 MB",
+      "indexes_size": "43 MB"
+    },
+    "records": {
+      "total": "102895",
+      "ready": "102895",
+      "with_images": "95638",
+      "with_metadata": "54870"
+    }
+  },
+  "performance": {
+    "memory": {
+      "rss": "46.54 MB",
+      "heapUsed": "6.11 MB",
+      "heapTotal": "8.46 MB"
+    },
+    "uptime": "0.00 horas"
+  },
+  "optimizations": {
+    "connectionPool": {
+      "enabled": true,
+      "max": 50
+    },
+    "compression": {
+      "enabled": true,
+      "level": 6
+    },
+    "rateLimit": {
+      "enabled": true,
+      "max": 100
+    },
+    "imageCache": {
+      "enabled": true,
+      "maxSize": "500MB"
+    }
+  },
+  "recommendations": [
+    "Cambiar NODE_ENV=production en servidor real",
+    "En producción, limitar CORS a dominios específicos",
+    "Solo 53.3% de registros tienen metadatos. Ejecutar reprocess_all_metadata.js",
+    "Verificar que .env esté en .gitignore",
+    "Verificar que firebase-key.json esté en .gitignore",
+    "CRÍTICO: Agregar .env a .gitignore"
+  ]
+}

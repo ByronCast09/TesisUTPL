@@ -1,0 +1,16 @@
+# Dependencias para el servicio automático en PC Remota
+# Instalar con: pip install -r requirements_pc_remota.txt
+
+# Monitoreo de archivos
+watchdog>=3.0.0
+
+# Base de datos PostgreSQL
+psycopg[binary]>=3.1.0
+
+# Procesamiento de imágenes (ya deberías tenerlo para advanced_ppi_converter)
+numpy>=1.20.0
+Pillow>=9.0.0
+
+# Requests (opcional, para API de ingestión)
+requests>=2.28.0
+
