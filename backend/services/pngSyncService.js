@@ -127,7 +127,45 @@ class PNGSyncService {
   }
 
   /**
-   * Sincroniza un PNG desde la PC remota
+   * Descarga JSON metadata asociado al PNG (opcional, no falla si no existe)
+   */
+  async downloadJSON(pngUrl) {
+    try {
+      // Convertir URL del PNG a URL del JSON
+      // Ejemplo: .../LOXX_20251231_034500.png -> .../LOXX_20251231_034500.json
+      const jsonUrl = pngUrl.replace(/\.png$/i, '.json');
+
+      console.log(`[png-sync] Intentando descargar JSON metadata: ${jsonUrl}`);
+
+      const response = await axios({
+        method: 'GET',
+        url: jsonUrl,
+        responseType: 'json',
+        timeout: 30000, // 30s timeout
+      });
+
+      if (response.data) {
+        console.log(` [png-sync] ✓ JSON metadata descargado exitosamente`);
+        console.log(`[png-sync] 📊 JSON content keys:`, Object.keys(response.data));
+        console.log(`[png-sync] 📊 maxDbz value:`, response.data.maxDbz);
+        console.log(`[png-sync] 📊 Full JSON (first 500 chars):`, JSON.stringify(response.data).substring(0, 500));
+        return response.data;
+      }
+
+      return null;
+    } catch (error) {
+      // No es crítico si el JSON no existe
+      if (error.response?.status === 404) {
+        console.log(`[png-sync] JSON metadata no encontrado (404) - continuando sin stats`);
+      } else {
+        console.warn(`[png-sync] Advertencia: No se pudo descargar JSON metadata: ${error.message}`);
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Sincroniza un PNG desde la PC remota + su JSON metadata
    */
   async syncPNG(pngFile, date) {
     const fileKey = `${this.radarId}_${date}_${pngFile.name}`;
@@ -144,6 +182,9 @@ class PNGSyncService {
       const pngBuffer = await this.downloadPNG(pngFile.url);
       const checksum = this.calculateChecksum(pngBuffer);
       const sourceTimestamp = this.extractTimestamp(pngFile.name, date);
+
+      // 🆕 Descargar JSON metadata asociado (si existe)
+      const jsonMetadata = await this.downloadJSON(pngFile.url);
 
       // Verificar si ya existe en PostgreSQL por checksum
       const existing = await radarMetadataRepository.listProcessed({
@@ -169,7 +210,7 @@ class PNGSyncService {
         }
       }
 
-      // Construir metadata
+      // Construir metadata completo (merge con JSON metadata)
       const metadata = {
         source: 'remote_sync',
         downloadDate: new Date().toISOString(),
@@ -177,6 +218,22 @@ class PNGSyncService {
         date,
         filename: pngFile.name,
         checksum,
+        // 🆕 Agregar stats del JSON si están disponibles
+        ...(jsonMetadata && {
+          // Normalizar campos: GUAXX usa 'max'/'min', LOXX usa 'maxDbz'/'minDbz'
+          maxDbz: jsonMetadata.maxDbz || jsonMetadata.max,
+          minDbz: jsonMetadata.minDbz || jsonMetadata.min,
+          max: jsonMetadata.max || jsonMetadata.maxDbz,
+          min: jsonMetadata.min || jsonMetadata.minDbz,
+          stats: jsonMetadata.stats,
+          precipitation: jsonMetadata.precipitation,
+          bounds: jsonMetadata.bounds,
+          shape: jsonMetadata.shape,
+          rows: jsonMetadata.rows,
+          cols: jsonMetadata.cols,
+          productType: jsonMetadata.productType,
+          radarName: jsonMetadata.radarName,
+        }),
       };
 
       // Guardar en PostgreSQL
@@ -196,7 +253,8 @@ class PNGSyncService {
       });
 
       if (result) {
-        console.log(`[png-sync] ✓ PNG sincronizado: ${pngFile.name} (ID: ${result.id})`);
+        const statsInfo = jsonMetadata?.maxDbz ? `(maxDbz: ${jsonMetadata.maxDbz} dBZ)` : '(sin stats)';
+        console.log(`[png-sync] ✓ PNG sincronizado: ${pngFile.name} ${statsInfo} (ID: ${result.id})`);
         this.syncedFiles.add(fileKey);
         this.saveSyncState();
         return { success: true, id: result.id };

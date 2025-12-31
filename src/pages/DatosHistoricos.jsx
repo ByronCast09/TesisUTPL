@@ -28,7 +28,7 @@ const FitBoundsOnOverlay = ({ bounds }) => {
 const DatosHistoricos = () => {
   const [lguaxxToggle, setLguaxxToggle] = useState(true);
   const [loxxToggle, setLoxxToggle] = useState(true);
-  const [selectedRadar, setSelectedRadar] = useState('Todos los radares');
+  const [selectedRadar, setSelectedRadar] = useState('Selecciona un radar');
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedDateInput, setSelectedDateInput] = useState('');
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -117,33 +117,55 @@ const DatosHistoricos = () => {
 
   // Extraer hora del timestamp o filename
   const extractTime = (timestamp, filename) => {
+
+    // 🔥 PRIORIDAD 1: Intentar extraer del filename (tiene la hora local correcta)
+    if (filename) {
+      // Formato LOXX: LOXX_20251231_034500.png (YYYYMMDD_HHMMSS)
+      const loxxMatch = filename.match(/(\d{8})_(\d{6})/);
+      if (loxxMatch) {
+        const hour = loxxMatch[2].substring(0, 2);
+        const minute = loxxMatch[2].substring(2, 4);
+        const result = `${hour}:${minute}`;
+        console.log('[extractTime] ✅ Parsed from LOXX filename:', result);
+        return result;
+      }
+
+      // Formato GUAXX: LGUAXX_2025123118200000dBuZ.png (YYYYMMDDHHMMSS sin guion bajo)
+      // Patrón: LGUAXX_YYYYMMDDHHMMSS...
+      const guaxxMatch = filename.match(/LGUAXX_(\d{14})/);
+      if (guaxxMatch) {
+        const dateTimeStr = guaxxMatch[1]; // 20251231182000
+        const hour = dateTimeStr.substring(8, 10);  // posición 8-9
+        const minute = dateTimeStr.substring(10, 12); // posición 10-11
+        const result = `${hour}:${minute}`;
+        console.log('[extractTime] ✅ Parsed from GUAXX filename:', result, 'dateTimeStr:', dateTimeStr);
+        return result;
+      }
+
+
+    }
+
+    // 🔥 PRIORIDAD 2 (Fallback): Intentar parsear timestamp si no hay filename
     if (timestamp) {
       // Intentar parsear timestamp ISO
       try {
         const date = new Date(timestamp);
         if (!isNaN(date.getTime())) {
-          return date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+          const result = date.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+          return result;
         }
       } catch (e) { }
 
-      // Intentar extraer de formato YYYYMMDD_HHMMSS
+      // Intentar extraer de formato YYYYMMDD_HHMMSS string
       const timeMatch = timestamp.match(/(\d{8})_(\d{6})/);
       if (timeMatch) {
         const hour = timeMatch[2].substring(0, 2);
         const minute = timeMatch[2].substring(2, 4);
-        return `${hour}:${minute}`;
+        const result = `${hour}:${minute}`;
+        return result;
       }
     }
 
-    // Intentar extraer del filename
-    if (filename) {
-      const filenameMatch = filename.match(/(\d{8})_(\d{6})/);
-      if (filenameMatch) {
-        const hour = filenameMatch[2].substring(0, 2);
-        const minute = filenameMatch[2].substring(2, 4);
-        return `${hour}:${minute}`;
-      }
-    }
 
     return '--:--';
   };
@@ -228,12 +250,19 @@ const DatosHistoricos = () => {
 
     console.log('estimatePrecipitation - maxValue:', maxValue, 'metadata:', parsedMetadata);
 
-    // Fórmula aproximada: Z = 200 * R^1.6 (Marshall-Palmer)
-    // R ≈ (Z/200)^(1/1.6)
-    // Pero primero convertir dBZ a Z (linear): Z = 10^(dBZ/10)
-    if (maxValue <= 0) {
-      console.log('maxValue <= 0, retornando 0.0');
+    // Valores razonables de dBZ: 10 a 50
+    // Los radares pueden dar valores > 50 dBZ sin calibrar
+    if (maxValue <= 10) {
+      console.log('maxValue <= 10, retornando 0.0');
       return '0.0';
+    }
+
+    // Limitar a 50 dBZ (lluvia torrencial realista)
+    // 50 dBZ = ~42 mm/h (tormenta fuerte)
+    // 60 dBZ = ~130 mm/h (irreal para Marshall-Palmer)
+    if (maxValue > 50) {
+      console.log(`maxValue muy alto (${maxValue}), limitando a 50 dBZ`);
+      maxValue = 50;
     }
 
     // Convertir dBZ a Z (reflectividad lineal en mm^6/m^3)
@@ -276,7 +305,7 @@ const DatosHistoricos = () => {
             time,
             radar: radarId === 'LGUAXX' ? 'GUAXX' : radarId,
             intensity,
-            precipitation: `${precipitation} mm/h`,
+            precipitation: precipitation === '0.0' ? 'N/A' : `${precipitation} mm/h`,
             filename: png.filename,
             metadata: metadata
           });
@@ -314,7 +343,7 @@ const DatosHistoricos = () => {
           let imageUrl = png.url;
           if (!imageUrl && png.id) {
             // Construimos manualmente con una ruta relativa que funcione con el proxy o directa
-            imageUrl = 'http://localhost:5000/api/radar/pngs/' + png.id + '/image';
+            imageUrl = '/api/radar/pngs/' + png.id + '/image';
           }
 
           images.push({
@@ -570,6 +599,28 @@ const DatosHistoricos = () => {
                     {radarImages.length} registros Encontrados para {selectedDateInput || selectedDate}
                   </p>
 
+                  {/* Fecha y Hora del Frame Actual */}
+                  {radarImages[currentImageIndex] && (
+                    <div className="mb-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-xs text-gray-500">Fecha</p>
+                          <p className="text-sm font-semibold text-gray-800">{selectedDateInput || selectedDate}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Hora</p>
+                          <p className="text-sm font-semibold text-gray-800">{radarImages[currentImageIndex].time}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500">Radar</p>
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${getRadarColor(radarImages[currentImageIndex].radar)} text-white`}>
+                            {radarImages[currentImageIndex].radar}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Mapa Interactivo */}
                   <div className="mb-4">
                     <div className="h-[400px] w-full border border-gray-200 rounded-lg overflow-hidden relative">
@@ -587,17 +638,17 @@ const DatosHistoricos = () => {
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                           />
 
-                          {/* Círculo de cobertura basado en el radar actual */}
+                          {/* Círculo de cobertura basado en el radar actual (solo borde) */}
                           {radarImages[currentImageIndex]?.radar === 'GUAXX' && (
                             <Circle
                               center={[-4.040, -79.869]}
                               radius={100000}
                               pathOptions={{
                                 color: '#6366f1',
-                                fillColor: '#818cf8',
-                                fillOpacity: 0.15,
+                                fillColor: 'transparent',
+                                fillOpacity: 0,
                                 weight: 2,
-                                opacity: 0.5
+                                opacity: 0.8
                               }}
                             />
                           )}
@@ -608,10 +659,10 @@ const DatosHistoricos = () => {
                               radius={100000}
                               pathOptions={{
                                 color: '#10b981',
-                                fillColor: '#34d399',
-                                fillOpacity: 0.15,
+                                fillColor: 'transparent',
+                                fillOpacity: 0,
                                 weight: 2,
-                                opacity: 0.5
+                                opacity: 0.8
                               }}
                             />
                           )}
