@@ -22,10 +22,24 @@ import sys
 import time
 import subprocess
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import io
 import re
+
+# ⚡ IMPORTS PARA MODO MONITOREO (watchdog)
+try:
+    from watchdog.observers import Observer
+    from watchdog.events import FileSystemEventHandler, FileSystemEvent
+    WATCHDOG_AVAILABLE = True
+except ImportError:
+    WATCHDOG_AVAILABLE = False
+    # Definir dummies para que el código no falle al definir la clase
+    class FileSystemEventHandler:
+        pass
+    class FileSystemEvent:
+        pass
+    Observer = None
 
 # Importar dependencias básicas primero
 try:
@@ -62,13 +76,20 @@ try:
             generate_clutter_maps,
             save_clutter_cache,
             extract_timestamp_from_filename,
-            parse_timestamp
+            parse_timestamp,
+            analyze_data_quality,
+            should_apply_filters,
+            apply_smart_filters
         )
         ADVANCED_FUNCTIONS_AVAILABLE = True
         print("✓ Funciones avanzadas disponibles desde loxx_dbzh_georeferenciado.py")
     except ImportError:
         ADVANCED_FUNCTIONS_AVAILABLE = False
         print("⚠️  loxx_dbzh_georeferenciado.py no encontrado, usando funciones básicas")
+    
+    # Configurar filtros inteligentes (solo si funciones avanzadas están disponibles)
+    ENABLE_SMART_FILTERS = ADVANCED_FUNCTIONS_AVAILABLE and 'should_apply_filters' in dir()
+    PLOT_QUALITY = 'medium'  # Calidad de imagen del docente
     
     # Intentar importar de convert_h5_to_png si existe
     try:
@@ -166,86 +187,90 @@ if not BASIC_FUNCTIONS_AVAILABLE:
         return None
     
     def to_rgba(data, vmin, vmax, transparent_below, cmap_name):
-            """
-            Convierte datos a RGBA usando la misma escala de colores que GUAXX
-            Basado en advanced_ppi_converter_standalone.py
-            """
-            # Si se especifica 'meteorological' o 'dbzh', usar escala meteorológica estándar
-            if cmap_name in ['meteorological', 'dbzh', 'radar']:
-                # Escala meteorológica estándar según intensidad de precipitación
-                dbzh_levels = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80]
-                
-                # Definir colores en formato hexadecimal
-                hex_colors = [
-                    '#FFFFFF00',  # Transparente (sin datos/ruido)
-                    '#00FFFFFF',  # Celeste claro (0-8 dBZ) - Precipitación muy ligera
-                    '#0080FF',    # Celeste/Azul claro (8-16 dBZ) - Precipitación ligera
-                    '#0000FF',    # Azul (16-24 dBZ) - Precipitación moderada baja
-                    '#0080FF',    # Azul a verde (24-32 dBZ) - Precipitación moderada
-                    '#00FF00',    # Verde (32-40 dBZ) - Precipitación moderada-fuerte
-                    '#80FF00',    # Verde a amarillo (40-48 dBZ) - Precipitación fuerte
-                    '#FFFF00',    # Amarillo (48-56 dBZ) - Precipitación muy fuerte
-                    '#FF8000',    # Naranja (56-64 dBZ) - Precipitación intensa
-                    '#FF0000',    # Rojo (64-72 dBZ) - Precipitación muy intensa
-                    '#FF00FF'     # Magenta brillante (>72 dBZ) - Precipitación extrema/granizo
-                ]
-                
-                # Convertir hex a RGBA (R, G, B, A) en rango 0-255
-                def hex_to_rgba(hex_color):
-                    """Convierte color hexadecimal #RRGGBBAA a tupla (R, G, B, A)"""
-                    hex_color = hex_color.lstrip('#')
-                    if len(hex_color) == 8:  # RRGGBBAA
-                        r = int(hex_color[0:2], 16)
-                        g = int(hex_color[2:4], 16)
-                        b = int(hex_color[4:6], 16)
-                        a = int(hex_color[6:8], 16)
-                        return (r, g, b, a)
-                    elif len(hex_color) == 6:  # RRGGBB (asume alpha=255)
-                        r = int(hex_color[0:2], 16)
-                        g = int(hex_color[2:4], 16)
-                        b = int(hex_color[4:6], 16)
-                        return (r, g, b, 255)
-                    return (0, 0, 0, 0)
-                
-                rgba_colors = [hex_to_rgba(color) for color in hex_colors]
-                
-                # Normalizar colores a rango 0-1 para matplotlib
-                rgba_colors_normalized = [(r/255.0, g/255.0, b/255.0, a/255.0) for r, g, b, a in rgba_colors]
-                
-                # Crear colormap y normalizador
-                # Tenemos 11 niveles = 10 intervalos, necesitamos 10 colores
-                cmap = ListedColormap(rgba_colors_normalized[:10])
-                norm = BoundaryNorm(dbzh_levels, len(rgba_colors_normalized[:10]))
-                
-                # Preparar datos - limitar a rango válido y reemplazar valores inválidos
-                clipped = np.clip(data, 0, 80)
-                # Reemplazar NaN con 0 para que BoundaryNorm funcione correctamente
-                clipped = np.where(np.isnan(clipped), 0, clipped)
-                
-                # Aplicar colormap
-                rgba = cmap(norm(clipped))
-                
-                # Aplicar transparencia: valores menores a transparent_below y NaN
-                alpha_mask = np.where(
-                    np.isnan(data) | (data < transparent_below) | (data < 8),
-                    0.0, 1.0
-                )
-                rgba[..., 3] = rgba[..., 3] * alpha_mask
-                
-                
-            else:
-                norm = colors.Normalize(vmin=vmin, vmax=vmax)
-                try:
-                    cmap = matplotlib.colormaps.get_cmap(cmap_name)
-                except AttributeError:
-                    cmap = cm.get_cmap(cmap_name)
-                clipped = np.clip(data, vmin, vmax)
-                rgba = cmap(norm(clipped))
-                alpha_mask = np.where(np.isnan(data) | (data < transparent_below), 0.0, 1.0)
-                rgba[..., 3] = alpha_mask
+        """
+        Convierte datos a RGBA usando la ESCALA DE COLORES OFICIAL
+        Basado en clima.utpl.edu.ec según especificación del director
+        """
+        # Usar escala oficial para todos los casos meteorológicos
+        if cmap_name in ['meteorological', 'dbzh', 'radar']:
+            # ========================================
+            # 🎨 ESCALA DE COLORES OFICIAL (clima.utpl.edu.ec)
+            # Especificación del Director - Enero 2026
+            # ========================================
             
-            rgba8 = (rgba * 255).astype(np.uint8)
-            return Image.fromarray(rgba8, mode="RGBA")
+            # Límites dBZ exactos según visor oficial
+            dbzh_levels = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80]
+            
+            # Colores hexadecimales EXACTOS del código del profesor
+            # (generar_png_loxx.py - líneas 412-422)
+            hex_colors = [
+                '#FFFFFF00',  # Transparente (sin datos/ruido)
+                '#00FFFFFF',  # Celeste claro (0-8 dBZ) - Precipitación muy ligera
+                '#0080FF',    # Celeste/Azul claro (8-16 dBZ) - Precipitación ligera
+                '#0000FF',    # Azul (16-24 dBZ) - Precipitación moderada baja
+                '#0080FF',    # Azul a verde (24-32 dBZ) - Precipitación moderada
+                '#00FF00',    # Verde (32-40 dBZ) - Precipitación moderada-fuerte
+                '#80FF00',    # Verde a amarillo (40-48 dBZ) - Precipitación fuerte
+                '#FFFF00',    # Amarillo a naranja (48-56 dBZ) - Precipitación muy fuerte
+                '#FF8000',    # Naranja a rojo (56-64 dBZ) - Precipitación intensa
+                '#FF0000',    # Rojo a magenta (64-72 dBZ) - Precipitación muy intensa
+                '#FF00FF'     # Magenta brillante (>72 dBZ) - Precipitación extrema/granizo
+            ]
+            
+            # Función auxiliar para convertir hex a RGBA
+            def hex_to_rgba(hex_color):
+                """Convierte #RRGGBB o #RRGGBBAA a tupla (R, G, B, A) normalizada 0-1"""
+                hex_color = hex_color.lstrip('#')
+                if len(hex_color) == 8:  # #RRGGBBAA
+                    r = int(hex_color[0:2], 16) / 255.0
+                    g = int(hex_color[2:4], 16) / 255.0
+                    b = int(hex_color[4:6], 16) / 255.0
+                    a = int(hex_color[6:8], 16) / 255.0
+                    return (r, g, b, a)
+                else:  # #RRGGBB
+                    r = int(hex_color[0:2], 16) / 255.0
+                    g = int(hex_color[2:4], 16) / 255.0
+                    b = int(hex_color[4:6], 16) / 255.0
+                    return (r, g, b, 1.0)  # Alpha = 1.0 (opaco)
+            
+            # Convertir todos los colores
+            rgba_colors = [hex_to_rgba(color) for color in hex_colors]
+            
+            # Crear colormap personalizado
+            cmap = ListedColormap(rgba_colors)
+            
+            # Normalización por rangos (BoundaryNorm)
+            # 10 colores para 10 intervalos: [0-8], [8-16], ..., [72-100]
+            norm = BoundaryNorm(dbzh_levels, len(rgba_colors))
+            
+            # Preparar datos
+            # Reemplazar NaN temporalmente con valor fuera de rango para el colormap
+            data_processed = np.where(np.isnan(data), -999, data)
+            
+            # Aplicar colormap
+            rgba = cmap(norm(data_processed))
+            
+            # Aplicar transparencia a valores inválidos
+            # Transparente si: NaN, menor que transparent_below, o menor que 8 dBZ
+            alpha_mask = np.where(
+                np.isnan(data) | (data < transparent_below) | (data < 8),
+                0.0,  # Completamente transparente
+                1.0   # Completamente opaco
+            )
+            rgba[..., 3] = alpha_mask
+            
+        else:
+            # Fallback: usar colormap estándar de matplotlib (para debug)
+            norm = colors.Normalize(vmin=vmin, vmax=vmax)
+            cmap = cm.get_cmap(cmap_name)
+            rgba = cmap(norm(data))
+            # Aplicar transparencia
+            alpha_mask = np.where(np.isnan(data) | (data < transparent_below), 0.0, 1.0)
+            rgba[..., 3] = alpha_mask
+        
+        # Convertir array RGBA (0-1) a imagen PIL RGBA (0-255)
+        rgba8 = (rgba * 255).astype(np.uint8)
+        return Image.fromarray(rgba8, mode="RGBA")
     
     def compute_bounds(lat_array, lon_array, default_bounds=None):
         if lat_array is not None and lon_array is not None:
@@ -274,19 +299,54 @@ if not BASIC_FUNCTIONS_AVAILABLE:
         return png_path, json_path, date_str, time_str
     
     def calculate_precipitation_from_dbz(dbz_value):
+        """
+        Calcula precipitación estimada (mm/h) desde reflectividad en dBZ
+        usando la fórmula Marshall-Palmer: Z = 200 * R^1.6
+        
+        Args:
+            dbz_value: Valor de reflectividad en dBZ
+        
+        Returns:
+            Precipitación en mm/h
+        """
         if dbz_value is None or np.isnan(dbz_value) or dbz_value <= 0:
             return 0.0
+        
+        # Convertir dBZ a Z (reflectividad lineal en mm^6/m^3)
         Z = np.power(10, dbz_value / 10.0)
+        
+        # Fórmula Marshall-Palmer: Z = 200 * R^1.6
+        # Despejar R: R = (Z/200)^(1/1.6)
         R = np.power(Z / 200.0, 1.0 / 1.6)
+        
         return float(R)
     
     def calculate_precipitation_stats(data_array):
+        """
+        Calcula estadísticas de precipitación desde datos de reflectividad (dBZ)
+        
+        Args:
+            data_array: Array con valores de reflectividad en dBZ
+        
+        Returns:
+            Diccionario con estadísticas de precipitación
+        """
+        # Filtrar valores válidos
         valid_data = data_array[~np.isnan(data_array) & (data_array > 0)]
+        
         if len(valid_data) == 0:
             return {
-                "min": 0.0, "max": 0.0, "mean": 0.0, "std": 0.0, "total": 0.0, "maxDbz": 0.0
+                "min": 0.0,
+                "max": 0.0,
+                "mean": 0.0,
+                "std": 0.0,
+                "total": 0.0,
+                "maxDbz": 0.0
             }
+        
+        # Calcular precipitación para cada valor válido
         precipitation_values = np.array([calculate_precipitation_from_dbz(dbz) for dbz in valid_data])
+        
         return {
             "min": float(np.min(precipitation_values)),
             "max": float(np.max(precipitation_values)),
@@ -297,17 +357,34 @@ if not BASIC_FUNCTIONS_AVAILABLE:
         }
     
     def extract_h5_additional_info(h5_buffer, h5file=None):
+        """
+        Extrae información adicional del archivo H5
+        
+        Args:
+            h5_buffer: Buffer del archivo H5 (BytesIO o path)
+            h5file: Archivo H5 abierto (opcional)
+        
+        Returns:
+            Diccionario con información adicional
+        """
         additional_info = {
-            "elevations": [], "scan_parameters": {}, "radar_parameters": {}, "file_info": {}
+            "elevations": [],
+            "scan_parameters": {},
+            "radar_parameters": {},
+            "file_info": {}
         }
+        
         try:
+            # Si no se proporciona h5file, abrirlo
             close_file = False
             if h5file is None:
+                # Resetear buffer si es posible
                 if hasattr(h5_buffer, 'seek'):
                     h5_buffer.seek(0)
                 h5file = h5py.File(h5_buffer, 'r')
                 close_file = True
             
+            # Extraer información de elevaciones
             for ds_num in range(1, 6):
                 try:
                     elev_path = f"dataset{ds_num}/where"
@@ -316,12 +393,15 @@ if not BASIC_FUNCTIONS_AVAILABLE:
                         if 'elangle' in elev_data.attrs:
                             elevation = float(elev_data.attrs['elangle'])
                             additional_info["elevations"].append({
-                                "dataset": ds_num, "elevation": elevation
+                                "dataset": ds_num,
+                                "elevation": elevation
                             })
                 except (KeyError, AttributeError, TypeError):
                     continue
             
+            # Extraer parámetros de escaneo
             try:
+                # Buscar información de rango, resolución, etc.
                 for ds_num in range(1, 6):
                     try:
                         where_path = f"dataset{ds_num}/where"
@@ -338,9 +418,10 @@ if not BASIC_FUNCTIONS_AVAILABLE:
                                 additional_info["scan_parameters"][f"dataset{ds_num}_nrays"] = nrays
                     except (KeyError, AttributeError, TypeError):
                         continue
-            except Exception:
-                pass
+            except Exception as e:
+                pass  # Silenciar errores menores
             
+            # Extraer información del radar
             try:
                 if 'what' in h5file:
                     what_data = h5file['what']
@@ -353,6 +434,7 @@ if not BASIC_FUNCTIONS_AVAILABLE:
             except (KeyError, AttributeError, TypeError):
                 pass
             
+            # Información del archivo
             try:
                 if hasattr(h5file, 'filename'):
                     additional_info["file_info"]["filename"] = str(h5file.filename)
@@ -361,12 +443,19 @@ if not BASIC_FUNCTIONS_AVAILABLE:
             
             if close_file:
                 h5file.close()
-        except Exception:
+                
+        except Exception as e:
+            # Error silencioso, retornar info vacía
             pass
+        
         return additional_info
     
     def build_metadata(radar_id, dataset_path, data_array, timestamp, date_str, bounds, args, png_path, 
                       h5_additional_info=None, h5_buffer=None):
+        """
+        Construye metadata completo incluyendo precipitación y información adicional del H5
+        """
+        # Calcular estadísticas básicas
         stats = {
             "min": float(np.nanmin(data_array)),
             "max": float(np.nanmax(data_array)),
@@ -376,8 +465,10 @@ if not BASIC_FUNCTIONS_AVAILABLE:
             "totalCount": int(np.size(data_array))
         }
         
+        # Calcular estadísticas de precipitación
         precipitation_stats = calculate_precipitation_stats(data_array)
         
+        # Construir metadata base
         metadata = {
             "radar": radar_id,
             "radarId": radar_id,
@@ -400,27 +491,48 @@ if not BASIC_FUNCTIONS_AVAILABLE:
             "status": "ready"
         }
         
+        # Agregar información adicional del H5 si está disponible
         if h5_additional_info:
             metadata["elevations"] = h5_additional_info.get("elevations", [])
             metadata["scan_parameters"] = h5_additional_info.get("scan_parameters", {})
             metadata["radar_parameters"] = h5_additional_info.get("radar_parameters", {})
             metadata["file_info"] = h5_additional_info.get("file_info", {})
         
+        # Agregar información de reflectividad en dBZ (maxDbz, minDbz)
         metadata["maxDbz"] = stats["max"]
         metadata["minDbz"] = stats["min"]
         
         return metadata
 
+# Información del radar LOXX
+# Ubicación: Loja, Ecuador
+# Coordenadas verificadas: -3.987°, -79.144° (WGS84)
+# Cobertura: ~70 km de radio
 RADAR_INFO = {
     'id': 'loxx',
     'name': 'LOXX',
-    'default_lat': -3.9960,
-    'default_lon': -79.2058,
-    'default_height': 2144.0
+    'default_lat': -3.987,     # ✓ CORREGIDO (era -3.9960, ~1 km al norte)
+    'default_lon': -79.144,    # ✓ CORREGIDO (era -79.2058, ~6.5 km al oeste)
+    'default_height': 2144.0,
+    'coverage_km': 70          # Documentación del alcance del radar
 }
 
-def create_cartesian_data_optimized_new(data, metadata, min_dbzh_threshold=0.0, resolution_factor=2):
+def create_cartesian_data_optimized_new(data, metadata, min_dbzh_threshold=-10.0, resolution_factor=2):
+        """
+        Convierte datos polares de DBZH a coordenadas cartesianas
+        Basado en el proyecto de referencia para LOXX
+        
+        Args:
+            data: Datos en coordenadas polares (dBZ) - shape (nrays, nbins)
+            metadata: Metadata del radar con nrays, nbins, rscale
+            min_dbzh_threshold: Umbral mínimo en dBZ (default: 10.0)
+            resolution_factor: Factor de resolución
+        
+        Returns:
+            tuple: (cart_data, cart_metadata)
+        """
         if data is None or len(data.shape) != 2:
+            print(f"Error: Invalid data shape: {None if data is None else data.shape}")
             return np.full((949, 949), -999, dtype=np.float32), {'width': 949, 'height': 949, 'nodata': -999, 'max_radius': 120000}
         
         if hasattr(data, 'shape') and len(data.shape) == 2:
@@ -435,11 +547,15 @@ def create_cartesian_data_optimized_new(data, metadata, min_dbzh_threshold=0.0, 
         max_radius_meters = nbins * rscale
         pixel_size = rscale * resolution_factor
         
+        # Tamaño fijo de 949x949 píxeles (como en el proyecto de referencia)
         width_px = height_px = 949
         center_px_x = width_px // 2
         center_px_y = height_px // 2
         
+        # Crear grilla de coordenadas
         y, x = np.ogrid[:height_px, :width_px]
+        
+        # Calcular distancia y ángulo desde el centro
         dx = x - center_px_x
         dy = center_px_y - y
         
@@ -447,13 +563,19 @@ def create_cartesian_data_optimized_new(data, metadata, min_dbzh_threshold=0.0, 
         angle = np.arctan2(dy, dx)
         angle = np.where(angle < 0, angle + 2 * np.pi, angle)
         
+        # Convertir a índices de bin y rayo
         bin_idx = (distance / rscale).astype(np.int32)
+        # Ajustar ángulo: el radar empieza en el norte (π/2)
         ray_angle = (np.pi/2 - angle) % (2*np.pi)
         ray_idx = ((ray_angle / (2*np.pi) * nrays) % nrays).astype(np.int32)
         
+        # Crear máscara de validación
         valid_mask = (distance <= max_radius_meters) & (bin_idx < nbins)
+        
+        # Inicializar datos cartesianos
         cart_data = np.full((height_px, width_px), -999, dtype=np.float32)
         
+        # Obtener puntos válidos
         valid_points = valid_mask & (bin_idx >= 0) & (ray_idx >= 0) & (bin_idx < nbins) & (ray_idx < nrays)
         valid_y, valid_x = np.where(valid_points)
         
@@ -461,83 +583,148 @@ def create_cartesian_data_optimized_new(data, metadata, min_dbzh_threshold=0.0, 
             valid_bin_idx = bin_idx[valid_points]
             valid_ray_idx = ray_idx[valid_points]
             
+            # Validar índices
             valid_indices = (valid_ray_idx < nrays) & (valid_bin_idx < nbins)
             valid_ray_idx = valid_ray_idx[valid_indices]
             valid_bin_idx = valid_bin_idx[valid_indices]
             valid_y = valid_y[valid_indices]
             valid_x = valid_x[valid_indices]
             
+            # Obtener valores de los datos polares
             valid_values = data[valid_ray_idx, valid_bin_idx]
             
+            # Filtrar por umbral mínimo
             valid_values_mask = ~np.isnan(valid_values) & (valid_values >= min_dbzh_threshold)
             cart_data[valid_y[valid_values_mask], valid_x[valid_values_mask]] = valid_values[valid_values_mask]
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error durante la transformación de datos: {e}")
         
+        # Interpolar huecos pequeños
         mask = cart_data == -999
         temp_data = np.copy(cart_data)
         temp_data[mask] = np.nan
         
+        # Usar interpolación rápida
         from scipy.ndimage import label
         filled_data = fast_interpolate_small_gaps_optimized(temp_data, max_gap_size=4)
         filled_data[np.isnan(filled_data)] = -999
         
         cart_metadata = {
-            'width': width_px, 'height': height_px, 'center_x': center_px_x, 'center_y': center_px_y,
-            'pixel_size': pixel_size, 'max_radius': max_radius_meters, 'nodata': -999, 'resolution_factor': resolution_factor
+            'width': width_px,
+            'height': height_px,
+            'center_x': center_px_x,
+            'center_y': center_px_y,
+            'pixel_size': pixel_size,
+            'max_radius': max_radius_meters,
+            'nodata': -999,
+            'resolution_factor': resolution_factor
         }
         
         return filled_data, cart_metadata
 
 def fast_interpolate_small_gaps_optimized(data, max_gap_size=2):
+    """Interpola huecos pequeños en los datos"""
     if not np.any(np.isnan(data)):
         return data
+    
     filled_data = data.copy()
     nan_mask = np.isnan(data)
+    
     if not np.any(nan_mask):
         return filled_data
+    
     from scipy.ndimage import label, binary_dilation
     labeled_array, num_features = label(nan_mask)
+    
     if num_features == 0:
         return filled_data
+    
     kernel_size = max_gap_size
     kernel = np.ones((kernel_size, kernel_size))
+    
     for i in range(1, num_features + 1):
         region_coords = np.where(labeled_array == i)
         region_size = len(region_coords[0])
+        
         if region_size <= max_gap_size * max_gap_size:
             dilated = binary_dilation(labeled_array == i, structure=kernel)
             neighbor_mask = dilated & ~(labeled_array == i)
             neighbor_values = data[neighbor_mask]
+            
             valid_neighbors = neighbor_values[~np.isnan(neighbor_values)]
             if len(valid_neighbors) > 0:
                 fill_value = np.nanmedian(valid_neighbors)
                 filled_data[region_coords] = fill_value
+    
     return filled_data
 
 def calculate_bounds_from_metadata(center_lat, center_lon, max_radius_meters, image_shape=None):
+    """
+    Calcula los bounds en formato Leaflet desde las coordenadas del radar
+    Formato: [[lat_min, lon_min], [lat_max, lon_max]]
+    
+    Los bounds se ajustan al aspect ratio de la imagen para evitar compresión/distorsión.
+    El radio máximo se mantiene, pero el rectángulo de bounds refleja las dimensiones de la imagen.
+    
+    Args:
+        center_lat: Latitud del centro del radar
+        center_lon: Longitud del centro del radar
+        max_radius_meters: Radio máximo en metros (cobertura del radar)
+        image_shape: Tupla (height, width) de la imagen para calcular aspect ratio
+    """
+    # Conversión: 1 grado ≈ 111 km
     max_radius_deg = max_radius_meters / 111000.0
+    
+    # Si tenemos las dimensiones de la imagen, ajustar bounds al aspect ratio
     if image_shape and len(image_shape) >= 2:
         height, width = image_shape[0], image_shape[1]
         aspect_ratio = width / height if height > 0 else 1.0
+        
+        print(f"  Dimensiones imagen: {width}x{height} (aspect ratio: {aspect_ratio:.3f})")
+        
+        # Calcular radios ajustados para que los bounds coincidan con el aspect ratio
+        # El radio máximo se mantiene como la diagonal del rectángulo
+        # Para un rectángulo con aspect_ratio = w/h:
+        # - Si aspect_ratio > 1 (más ancha): más rango en longitud
+        # - Si aspect_ratio < 1 (más alta): más rango en latitud
+        
         if aspect_ratio >= 1.0:
+            # Imagen más ancha o cuadrada: mantener radio vertical, expandir horizontal
             lat_radius = max_radius_deg
             lon_radius = max_radius_deg * aspect_ratio
         else:
+            # Imagen más alta: expandir radio vertical, mantener horizontal
             lat_radius = max_radius_deg / aspect_ratio
             lon_radius = max_radius_deg
+        
+        print(f"  Radios ajustados: lat={lat_radius:.6f}°, lon={lon_radius:.6f}°")
     else:
+        # Sin dimensiones: usar bounds cuadrados por defecto
         lat_radius = max_radius_deg
         lon_radius = max_radius_deg
+        print(f"  Sin dimensiones de imagen, usando bounds cuadrados")
     
+    # Calcular esquinas del rectángulo
     lat_sw = center_lat - lat_radius
     lon_sw = center_lon - lon_radius
     lat_ne = center_lat + lat_radius
     lon_ne = center_lon + lon_radius
+    
+    # Formato para Leaflet: [[south, west], [north, east]]
     bounds = [[lat_sw, lon_sw], [lat_ne, lon_ne]]
+    
+    print(f"Bounds calculados para Leaflet:")
+    print(f"  Centro: [{center_lat:.6f}, {center_lon:.6f}]")
+    print(f"  Radio base: {max_radius_deg:.6f}° (≈{max_radius_meters/1000:.1f}km)")
+    print(f"  SW: [{lat_sw:.6f}, {lon_sw:.6f}]")
+    print(f"  NE: [{lat_ne:.6f}, {lon_ne:.6f}]")
+    print(f"  Dimensiones bounds: lat={lat_ne-lat_sw:.6f}°, lon={lon_ne-lon_sw:.6f}°")
+    
     return bounds
 
 def extract_timestamp_from_filename_simple(filename):
+    """Extrae timestamp del nombre de archivo"""
+    # Formato: 1003_20251206_193000.h5.gz
     pattern = r'(\d{8})_(\d{6})'
     match = re.search(pattern, filename)
     if match:
@@ -545,142 +732,449 @@ def extract_timestamp_from_filename_simple(filename):
     return None
 
 def detect_compression_type(file_path):
+    """Detecta el tipo de compresión del archivo"""
     file_path = Path(file_path)
     ext = file_path.suffix.lower()
-    if ext == '.zip': return 'zip'
-    elif ext in ['.tar', '.tar.gz', '.tgz']: return 'tar'
-    elif ext == '.gz': return 'gzip'
+    
+    if ext == '.zip':
+        return 'zip'
+    elif ext in ['.tar', '.tar.gz', '.tgz']:
+        return 'tar'
+    elif ext == '.gz':
+        return 'gzip'
     else:
+        # Intentar detectar por contenido
         try:
             with open(file_path, 'rb') as f:
                 header = f.read(4)
-                if header.startswith(b'PK'): return 'zip'
-                elif header.startswith(b'\x1f\x8b'): return 'gzip'
-                elif header.startswith(b'ustar'): return 'tar'
+                if header.startswith(b'PK'):
+                    return 'zip'
+                elif header.startswith(b'\x1f\x8b'):
+                    return 'gzip'
+                elif header.startswith(b'ustar'):
+                    return 'tar'
         except Exception:
             pass
+    
     return None
 
 def extract_h5_from_gzip(gzip_path):
+    """Extrae un archivo .h5 desde un GZIP en memoria"""
     try:
         with gzip.open(gzip_path, 'rb') as gz:
             return io.BytesIO(gz.read())
     except Exception as e:
+        print(f"Error extrayendo de {gzip_path}: {e}")
         return None
 
 def extract_h5_from_zip(zip_path, h5_filename=None):
+    """Extrae un archivo .h5 desde un ZIP en memoria"""
     try:
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             if h5_filename is None:
+                # Buscar cualquier archivo .h5 en el ZIP
                 h5_files = [f for f in zip_ref.namelist() if f.endswith('.h5')]
-                if not h5_files: return None
+                if not h5_files:
+                    return None
                 h5_filename = h5_files[0]
+            
+            # Leer el archivo .h5 en memoria
             h5_data = zip_ref.read(h5_filename)
             return io.BytesIO(h5_data)
-    except Exception:
+    except Exception as e:
+        print(f"Error extrayendo {h5_filename} de {zip_path}: {e}")
         return None
 
 def extract_h5_from_tar(tar_path, h5_filename=None):
+    """Extrae un archivo .h5 desde un TAR en memoria"""
     try:
         mode = 'r:gz' if tar_path.suffix == '.gz' else 'r'
         with tarfile.open(tar_path, mode) as tar:
             if h5_filename is None:
+                # Buscar cualquier archivo .h5
                 h5_files = [m for m in tar.getmembers() if m.name.endswith('.h5')]
-                if not h5_files: return None
+                if not h5_files:
+                    return None
                 h5_filename = h5_files[0].name
+            
             member = tar.getmember(h5_filename)
             h5_data = tar.extractfile(member).read()
             return io.BytesIO(h5_data)
-    except Exception:
+    except Exception as e:
+        print(f"Error extrayendo de {tar_path}: {e}")
         return None
 
-def process_compressed_h5(compressed_path, output_dir, radar_id='LOXX', clutter_maps=None, clutter_dir=None,
-                        vmin=10.0, vmax=70.0, transparent_below=8.0, cmap='meteorological', default_bounds=None):
+def process_compressed_h5(compressed_path, output_dir, radar_id='LOXX', 
+                        clutter_maps=None, clutter_dir=None,
+                        vmin=10.0, vmax=70.0, transparent_below=8.0, 
+                        cmap='meteorological', default_bounds=None):
+    """
+    Procesa un archivo comprimido usando el enfoque avanzado similar a generar_png_loxx.py
+    """
     compressed_path = Path(compressed_path)
     output_dir = Path(output_dir)
-    comp_type = detect_compression_type(compressed_path)
-    if not comp_type: return None
     
-    h5_buffer = None
-    if comp_type == 'zip': h5_buffer = extract_h5_from_zip(compressed_path, None)
-    elif comp_type == 'gzip': h5_buffer = extract_h5_from_gzip(compressed_path)
-    elif comp_type == 'tar': h5_buffer = extract_h5_from_tar(compressed_path)
-    
-    if h5_buffer is None: return None
-    
+    if not compressed_path.exists():
+        print(f"Archivo no encontrado: {compressed_path}")
+        return None
+    # Extraer timestamp del nombre del archivo para verificación rápida
     timestamp_str = extract_timestamp_from_filename_simple(compressed_path.name)
-    if not timestamp_str:
-        timestamp = datetime.utcfromtimestamp(compressed_path.stat().st_mtime)
-    else:
+    if timestamp_str:
         try:
             date_str, time_str = timestamp_str.split('_')
             timestamp = datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
-        except:
-            timestamp = datetime.utcfromtimestamp(compressed_path.stat().st_mtime)
             
+            # Construir rutas de salida esperadas
+            date_dir_str = timestamp.strftime("%Y-%m-%d")
+            date_dir = output_dir / date_dir_str
+            png_path = date_dir / f"{radar_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
+            json_path = date_dir / f"{radar_id}_{timestamp.strftime('%Y%m%d_%H%M%S')}.json"
+            
+            # ⚡ VERIFICACIÓN INSTANTÁNEA (< 1ms)
+            if png_path.exists() and json_path.exists():
+                # Archivo ya procesado - retornar inmediatamente SIN imprimir
+                return {
+                    'png': str(png_path),
+                    'json': str(json_path),
+                    'skipped': True
+                }
+        except Exception:
+            # Si falla el parse del timestamp, continuar con procesamiento normal
+            pass
+    
+    # Detectar tipo de compresión
+    comp_type = detect_compression_type(compressed_path)
+    if not comp_type:
+        print(f"No se pudo detectar el tipo de compresión de {compressed_path}")
+        return None
+    
+    print(f"Procesando {compressed_path.name} (tipo: {comp_type})")
+    
+    # Extraer .h5 en memoria
+    h5_buffer = None
+    if comp_type == 'zip':
+        h5_buffer = extract_h5_from_zip(compressed_path, None)
+    elif comp_type == 'gzip':
+        h5_buffer = extract_h5_from_gzip(compressed_path)
+    elif comp_type == 'tar':
+        h5_buffer = extract_h5_from_tar(compressed_path)
+    
+    if h5_buffer is None:
+        print(f"No se encontró archivo .h5 en {compressed_path}")
+        return None
+    
+    # ⚡ IMPORTANTE: Extraer timestamp del NOMBRE del archivo, NO del sistema
+    # Esto evita problemas si la PC remota tiene la hora mal configurada
+    timestamp_str = extract_timestamp_from_filename_simple(compressed_path.name)
+    if not timestamp_str:
+        print(f"No se pudo extraer timestamp del nombre: {compressed_path.name}")
+        return None
+    
+    try:
+        date_str, time_str = timestamp_str.split('_')
+        timestamp = datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
+    except:
+        print(f"Timestamp inválido: {timestamp_str}")
+        return None
+    
     try:
         all_dbzh_data = []
         all_metadata = []
         
+        # Si tenemos funciones avanzadas, usar el enfoque avanzado
         if ADVANCED_FUNCTIONS_AVAILABLE:
+            print("  Usando procesamiento avanzado con DBZH...")
+            
+            # ============================================================
+            # PROCESAMIENTO EXACTO DEL DOCENTE (generar_png_loxx.py)
+            # ============================================================
+            
+            # Constantes del docente
+            MIN_DBZH_THRESHOLD = 10.0  # Mismo umbral que el docente (10.0 en config)
+            CLUTTER_FACTOR = 1.3
+            RESOLUTION_FACTOR = 2
+            
+            # Procesar múltiples datasets (elevaciones) - DBZH está en data2
             for dataset_number in range(1, 6):
                 data, metadata = extract_dbzh_data(h5_buffer, dataset_number, 2)
-                if data is None or metadata is None or metadata.get('quantity', '') != 'DBZH': continue
-                data = np.where(data > 100.0, 100.0, data)
-                valid_mask = ~np.isnan(data)
-                if np.any(valid_mask):
-                    data_filtered = data.copy()
-                    data_filtered[valid_mask] = median_filter(data[valid_mask], size=3, mode='nearest')
-                    data = data_filtered
                 
-                if clutter_maps:
-                    clutter_key = f"dataset{dataset_number}_data2"
-                    if clutter_key in clutter_maps:
-                        clutter_map = clutter_maps[clutter_key]
-                        if data.shape == clutter_map.shape:
-                            corrected_data = apply_clutter_correction(
-                                data, clutter_map, method='adaptive', min_threshold=vmin, clutter_factor=1.5
+                if data is None or metadata is None or metadata.get('quantity', '') != 'DBZH':
+                    continue
+                
+                # Aplicar filtro de mediana
+                if data is not None:
+                    # Limitar valores extremos
+                    data = np.where(data > 100.0, 100.0, data)
+                    valid_mask = ~np.isnan(data)
+                    if np.any(valid_mask):
+                        data_filtered = data.copy()
+                        data_filtered[valid_mask] = median_filter(data[valid_mask], size=3, mode='nearest')
+                        data = data_filtered
+                
+                # Aplicar corrección de clutter adaptativa (como el docente)
+                clutter_key = f"dataset{dataset_number}_data2"
+                if clutter_maps and clutter_key in clutter_maps:
+                    clutter_map = clutter_maps[clutter_key]
+                    
+                    if data.shape == clutter_map.shape:
+                        adjusted_clutter_factor = CLUTTER_FACTOR * 1.5
+                        
+                        corrected_data = apply_clutter_correction(
+                            data, clutter_map, method='adaptive',
+                            min_threshold=10.0,  # Hardcoded como en el docente
+                            clutter_factor=adjusted_clutter_factor
+                        )
+                        
+                        if not np.isnan(corrected_data).all():
+                            corrected_data = fast_interpolate_small_gaps_optimized(
+                                corrected_data, max_gap_size=4  # Docente usa 4
                             )
-                            if not np.isnan(corrected_data).all():
-                                corrected_data = fast_interpolate_small_gaps_optimized(corrected_data, max_gap_size=2)
-                                all_dbzh_data.append(corrected_data)
-                                all_metadata.append(metadata)
-                                continue
+                            all_dbzh_data.append(corrected_data)
+                            all_metadata.append(metadata)
+                            print(f"    Dataset{dataset_number}/data2 procesado OK")
+                            continue
+                
+                # Sin corrección de clutter
                 all_dbzh_data.append(data)
                 all_metadata.append(metadata)
+                print(f"    Dataset{dataset_number}/data2 procesado sin clutter")
             
-            if not all_dbzh_data: return None
+            if not all_dbzh_data:
+                print(f"    No se pudieron extraer datos DBZH")
+                return None
+            
+            # Combinar elevaciones (tomar máximo) - IGUAL AL DOCENTE
             stacked_data = np.stack(all_dbzh_data)
             max_dbzh = np.nanmax(stacked_data, axis=0)
-            if np.isnan(max_dbzh).all(): return None
+            
+            if np.isnan(max_dbzh).all():
+                print(f"    Todos los valores son NaN")
+                return None
+            
             metadata = all_metadata[0]
-            cart_data, cart_metadata = create_cartesian_data_optimized_new(max_dbzh, metadata, min_dbzh_threshold=0.0, resolution_factor=2)
-            valid_data = cart_data > cart_metadata['nodata']
-            if not np.any(valid_data): return None
+            
+            # Transformación cartesiana - IGUAL AL DOCENTE
+            print(f"    Aplicando transformación cartesiana...")
+            cart_data, cart_metadata = create_cartesian_data_optimized_new(
+                max_dbzh, 
+                metadata, 
+                MIN_DBZH_THRESHOLD,  # 8.0 como el docente
+                RESOLUTION_FACTOR
+            )
+            
+            # Contar píxeles válidos
+            valid_before = np.sum(cart_data > cart_metadata['nodata'])
+            print(f"    Píxeles válidos: {valid_before}")
+            
+            # ⚡ FILTROS INTELIGENTES ADAPTATIVOS - TEMPORALMENTE DESHABILITADOS
+            # Los filtros eliminan demasiados datos en algunos casos
+            # TODO: Ajustar umbrales para ser menos agresivos
+            
+            # print(f"    Analizando calidad de datos...")
+            # should_filter, filter_config, reason = should_apply_filters(cart_data, cart_metadata)
+            # print(f"    Decisión de filtros: {reason}")
+            
+            # if should_filter:
+            #     cart_data = apply_smart_filters(cart_data, cart_metadata, filter_config)
+            #     valid_after = np.sum(cart_data > cart_metadata['nodata'])
+            #     print(f"    Píxeles después de filtros: {valid_after}")
+            # else:
+            #     print(f"    Filtros omitidos - datos preservados")
+            
+            # Verificar datos válidos finales
+            if valid_before < 3:
+                print("    Insuficientes datos válidos")
+                return None
+            
+            # Preparar datos para imagen
             data_array = cart_data
             center_lat = metadata.get('lat', RADAR_INFO['default_lat'])
             center_lon = metadata.get('lon', RADAR_INFO['default_lon'])
-            max_radius = cart_metadata.get('max_radius', 120000)
-            dataset_path = 'DBZH'
+            max_radius = cart_metadata.get('max_radius', 70000)
+            
+            # Contar datos válidos antes de filtros
+            valid_before = np.sum(data_array > cart_metadata['nodata'])
+            print(f"    Píxeles válidos antes de filtros: {valid_before}")
+            
+            # Sistema de filtros inteligentes (como el docente)
+            if ENABLE_SMART_FILTERS and 'should_apply_filters' in dir():
+                print(f"    Analizando calidad de datos para filtros inteligentes...")
+                should_filter, filter_config, reason = should_apply_filters(data_array, cart_metadata)
+                print(f"    Decisión: {reason}")
+                
+                if should_filter:
+                    data_array = apply_smart_filters(data_array, cart_metadata, filter_config)
+                    valid_after = np.sum(data_array > cart_metadata['nodata'])
+                    print(f"    Píxeles después de filtros: {valid_after}")
+                else:
+                    print(f"    Filtros omitidos para preservar datos")
+            else:
+                print(f"    Filtros inteligentes deshabilitados o no disponibles")
+            
+            # Generar rutas de salida
+            timestamp_str = metadata.get('timestamp', extract_timestamp_from_filename_simple(compressed_path.name))
+            if timestamp_str:
+                try:
+                    date_str, time_str = timestamp_str.split('_')
+                    # El timestamp del archivo H5 está en UTC
+                    utc_timestamp = datetime.strptime(f"{date_str}_{time_str}", "%Y%m%d_%H%M%S")
+                    
+                    # ⚡ CONVERTIR A HORA LOCAL ECUADOR (UTC-5) para el nombre del archivo
+                    ecuador_timestamp = utc_timestamp - timedelta(hours=5)
+                    timestamp = ecuador_timestamp
+                except:
+                    utc_ts = datetime.utcfromtimestamp(compressed_path.stat().st_mtime)
+                    timestamp = utc_ts - timedelta(hours=5)
+            else:
+                utc_ts = datetime.utcfromtimestamp(compressed_path.stat().st_mtime)
+                timestamp = utc_ts - timedelta(hours=5)
+            
+            png_path, json_path, date_str, _ = build_output_paths(output_dir, radar_id, timestamp)
+            
+            # Generar imagen PNG - MÉTODO EXACTO DEL DOCENTE (transparente)
+            print(f"    Generando imagen PNG...")
+            
+            # Configuración de matplotlib
+            import matplotlib.pyplot as plt
+            plt.ioff()
+            
+            try:
+                # Configuración de calidad (del docente)
+                quality_settings = {
+                    'low': {'dpi': 72, 'interpolation': 'nearest'},
+                    'medium': {'dpi': 100, 'interpolation': 'nearest'},
+                    'high': {'dpi': 150, 'interpolation': 'bilinear'},
+                    'ultra': {'dpi': 300, 'interpolation': 'bicubic'}
+                }
+                
+                settings = quality_settings.get(PLOT_QUALITY, quality_settings['medium'])
+                dpi = settings['dpi']
+                interpolation = settings['interpolation']
+                
+                # Preparar datos de reflectividad
+                dbzh_data = np.zeros_like(data_array, dtype=np.float32)
+                mask = data_array == cart_metadata['nodata']
+                valid_data = ~mask
+                
+                if np.any(valid_data):
+                    dbzh_data[valid_data] = data_array[valid_data]
+                
+                # Aplicar umbral mínimo
+                dbzh_data[dbzh_data < MIN_DBZH_THRESHOLD] = cart_metadata['nodata']
+                masked_dbzh = np.ma.masked_where(dbzh_data == cart_metadata['nodata'], dbzh_data)
+                
+                # Escala de colores del docente - EXACTA
+                dbzh_levels = [0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80]
+                colors = [
+                    '#FFFFFF00',  # Transparente (sin datos/ruido)
+                    '#00FFFFFF',  # Celeste claro (0-8 dBZ)
+                    '#0080FF',    # Celeste/Azul claro (8-16 dBZ)
+                    '#0000FF',    # Azul (16-24 dBZ)
+                    '#0080FF',    # Azul a verde (24-32 dBZ)
+                    '#00FF00',    # Verde (32-40 dBZ)
+                    '#80FF00',    # Verde a amarillo (40-48 dBZ)
+                    '#FFFF00',    # Amarillo a naranja (48-56 dBZ)
+                    '#FF8000',    # Naranja a rojo (56-64 dBZ)
+                    '#FF0000',    # Rojo a magenta (64-72 dBZ)
+                    '#FF00FF'     # Magenta brillante (>72 dBZ)
+                ]
+                
+                cmap = ListedColormap(colors)
+                norm = BoundaryNorm(dbzh_levels, cmap.N)
+                
+                # Configuración de figura - EXACTA DEL DOCENTE
+                fig_size = (9.49, 9.49)
+                fig = plt.figure(figsize=fig_size, dpi=dpi, facecolor='none')
+                
+                # Crear axes sin bordes
+                ax = fig.add_axes([0, 0, 1, 1])
+                ax.axis('off')
+                
+                # Calcular extent en píxeles
+                width_px = cart_metadata.get('width', 949)
+                height_px = cart_metadata.get('height', 949)
+                img_extent = [0, width_px, 0, height_px]
+                
+                # Dibujar SOLO los datos del radar
+                ax.imshow(masked_dbzh, extent=img_extent, cmap=cmap, norm=norm,
+                         origin='upper', alpha=1.0, interpolation=interpolation)
+                
+                # Guardar como PNG con transparencia - EXACTO DEL DOCENTE
+                from io import BytesIO
+                buf = BytesIO()
+                plt.savefig(buf, format='png', dpi=dpi, transparent=True, 
+                           bbox_inches='tight', pad_inches=0)
+                buf.seek(0)
+                
+                # Guardar a archivo
+                from PIL import Image
+                image = Image.open(buf)
+                image.save(png_path, format="PNG")
+                
+                img_width, img_height = image.size
+                print(f"    Dimensiones: {img_width}x{img_height}")
+                
+                buf.close()
+                
+            finally:
+                plt.close(fig)
+                plt.close('all')
+            
+            # Calcular bounds
+            bounds_leaflet = calculate_bounds_from_metadata(
+                center_lat, center_lon, max_radius, (cart_metadata['height'], cart_metadata['width'])
+            )
+            
+            # Metadata
+            metadata_dict = {
+                'timestamp': timestamp_str,
+                'radar_id': RADAR_INFO['id'],
+                'center_lat': center_lat,
+                'center_lon': center_lon,
+                'bounds': bounds_leaflet,
+                'radar_info': {
+                    'id': RADAR_INFO['id'],
+                    'name': RADAR_INFO['name'],
+                    'lat': center_lat,
+                    'lon': center_lon,
+                    'height': metadata.get('height', RADAR_INFO['default_height'])
+                },
+                'image_dimensions': {
+                    'width': img_width,
+                    'height': img_height
+                }
+            }
+            
         else:
+            # Enfoque básico si no hay funciones avanzadas
+            print("  Usando procesamiento básico...")
             with h5py.File(h5_buffer, 'r') as h5file:
+                # Intentar buscar datos DBZH específicamente
                 dataset_path = None
                 data_array = None
+                
+                # Buscar específicamente data2 (DBZH) primero, luego data1 como fallback
+                # Priorizar data2 porque ahí está DBZH (reflectividad)
                 all_dbzh_data = []
+                all_metadata = []
+                
+                # Buscar DBZH en data2 de múltiples elevaciones
                 for ds_num in range(1, 6):
                     try:
+                        # Priorizar data2 (DBZH)
                         test_path = f"dataset{ds_num}/data2/data"
                         if test_path in h5file:
                             test_data = h5file[test_path][...]
                             if test_data.ndim >= 2 and np.prod(test_data.shape) > 1000:
                                 data_2d = np.array(test_data, dtype=np.float32)
-                                if data_2d.ndim == 3: data_2d = data_2d[-1]
+                                if data_2d.ndim == 3:
+                                    data_2d = data_2d[-1]
                                 
-                                # APLICAR CALIBRACIÓN: dBZ = (valor × gain) + offset
+                                # ✅ APLICAR CALIBRACIÓN CORRECTAMENTE
                                 what_path = f"dataset{ds_num}/data2/what"
-                                gain = 0.5  # Default
-                                offset = -32.0  # Default
-                                nodata = 255.0  # Default
+                                gain = 0.5
+                                offset = -32.0
+                                nodata = 255.0
                                 
                                 if what_path in h5file:
                                     what = h5file[what_path]
@@ -691,104 +1185,921 @@ def process_compressed_h5(compressed_path, output_dir, radar_id='LOXX', clutter_
                                     if 'nodata' in what.attrs:
                                         nodata = float(what.attrs['nodata'])
                                 
-                                # Marcar nodata como NaN ANTES de calibrar
-                                data_2d[data_2d == nodata] = np.nan
-                                
-                                # Aplicar calibración
+                                # PRIMERO calibrar
                                 data_2d = (data_2d * gain) + offset
                                 
-                                valid_count = np.sum(~np.isnan(data_2d))
-                                if valid_count > 100:
+                                # DESPUÉS marcar nodata
+                                nodata_calibrated = (nodata * gain) + offset
+                                data_2d[np.abs(data_2d - nodata_calibrated) < 0.1] = np.nan
+                                
+                                # Verificar que tenga datos válidos distribuidos
+                                valid_data = ~np.isnan(data_2d)
+                                valid_count = np.sum(valid_data)
+                                total_count = np.prod(data_2d.shape)
+                                
+                                if valid_count > 100:  # Al menos 100 píxeles válidos
                                     all_dbzh_data.append(data_2d)
-                    except Exception: continue
+                                    print(f"    Encontrado dataset{ds_num}/data2 (shape: {data_2d.shape}, válidos: {valid_count}/{total_count})")
+                    except (KeyError, AttributeError) as e:
+                        continue
                 
+                # Si encontramos múltiples elevaciones, combinar (tomar máximo)
                 if len(all_dbzh_data) > 0:
-                    stacked = np.stack(all_dbzh_data)
-                    data_array = np.nanmax(stacked, axis=0)
-                    dataset_path = "dataset1-N/data2/data (combinado)"
+                    if len(all_dbzh_data) > 1:
+                        print(f"    Combinando {len(all_dbzh_data)} elevaciones (tomando máximo)...")
+                        stacked = np.stack(all_dbzh_data)
+                        data_array = np.nanmax(stacked, axis=0)
+                        
+                        # ⚡ DIAGNÓSTICO RADIAL: Analizar distribución por distancia del centro
+                        valid_polar = data_array[~np.isnan(data_array)]
+                        if len(valid_polar) > 0:
+                            print(f"    📊 DISTRIBUCIÓN RADIAL (por bins):")
+                            for bin_range in [(0, 100), (100, 200), (200, 400), (400, 704)]:
+                                bin_data = data_array[:, bin_range[0]:bin_range[1]]
+                                valid_in_range = bin_data[~np.isnan(bin_data)]
+                                if len(valid_in_range) > 0:
+                                    mean_val = np.mean(valid_in_range)
+                                    above_8 = np.sum(valid_in_range >= 8.0)
+                                    pct_above_8 = 100 * above_8 / len(valid_in_range)
+                                    print(f"        Bins {bin_range[0]:3d}-{bin_range[1]:3d}: mean={mean_val:6.2f} dBZ, valores≥8dBZ: {above_8:5d} ({pct_above_8:5.1f}%)")
+                        
+                        dataset_path = f"dataset1-{len(all_dbzh_data)}/data2/data (combinado)"
+                    else:
+                        data_array = all_dbzh_data[0]
+                        dataset_path = "dataset1/data2/data"
+                    
+                    print(f"    Usando DBZH combinado (shape: {data_array.shape})")
                 else:
-                    dataset_path = detect_dataset(h5file)
-                    data_array = load_data(h5file, dataset_path)
+                    # Fallback: buscar data1 si no hay data2
+                    print("    No se encontró data2, buscando data1...")
+                    for ds_num in range(1, 6):
+                        try:
+                            test_path = f"dataset{ds_num}/data1/data"
+                            if test_path in h5file:
+                                test_data = h5file[test_path][...]
+                                if test_data.ndim >= 2 and np.prod(test_data.shape) > 1000:
+                                    dataset_path = test_path
+                                    data_array = np.array(test_data, dtype=np.float32)
+                                    if data_array.ndim == 3:
+                                        data_array = data_array[-1]
+                                    print(f"    Encontrado dataset: {dataset_path} (shape: {data_array.shape})")
+                                    break
+                        except (KeyError, AttributeError):
+                            continue
+                    
+                    # Si aún no se encontró, usar detección automática
+                    if dataset_path is None:
+                        try:
+                            dataset_path = detect_dataset(h5file)
+                            data_array = load_data(h5file, dataset_path)
+                            print(f"    Usando dataset detectado: {dataset_path} (shape: {data_array.shape})")
+                        except ValueError as e:
+                            print(f"    ⚠️  Archivo H5 sin datos válidos (probablemente corrupto): {e}")
+                            return None
                 
-                scan_metadata = { 'nrays': data_array.shape[0], 'nbins': data_array.shape[1], 'rscale': 75.0 }
-                cart_data, cart_metadata = create_cartesian_data_optimized_new(data_array, scan_metadata, min_dbzh_threshold=0.0, resolution_factor=2)
-                if cart_data is not None:
-                    data_array = cart_data
-                    max_radius = cart_metadata.get('max_radius', 120000)
+                # Verificar dimensiones
+                if data_array is None or data_array.ndim < 2:
+                    print(f"    ⚠️  Dataset inválido: {data_array.ndim if data_array is not None else 0} dimensiones (se necesitan al menos 2)")
+                    return None
+                
+                # Verificar distribución de datos
+                valid_mask = ~np.isnan(data_array)
+                valid_count = np.sum(valid_mask)
+                total_count = np.prod(data_array.shape)
+                valid_percentage = (valid_count / total_count) * 100
+                
+                print(f"    Datos válidos: {valid_count}/{total_count} ({valid_percentage:.1f}%)")
+                
+                # Verificar que no sea una línea (una dimensión muy pequeña)
+                if min(data_array.shape) < 10:
+                    print(f"    Advertencia: Una dimensión es muy pequeña ({data_array.shape}), puede generar una línea")
+                    print(f"    Considera usar loxx_dbzh_georeferenciado.py para mejor procesamiento")
+                
+                # Verificar distribución espacial de datos válidos
+                if valid_count > 0:
+                    # Verificar que los datos no estén concentrados en una sola línea
+                    rows_with_data = np.sum(np.any(valid_mask, axis=1) if data_array.ndim == 2 else False)
+                    cols_with_data = np.sum(np.any(valid_mask, axis=0) if data_array.ndim == 2 else False)
+                    
+                    print(f"    Filas con datos: {rows_with_data}/{data_array.shape[0]}")
+                    print(f"    Columnas con datos: {cols_with_data}/{data_array.shape[1]}")
+                    
+                    # Los datos polares siempre necesitan transformación cartesiana
+                    # Extraer metadata de parámetros de escaneo
+                    scan_metadata = {
+                        'nrays': data_array.shape[0] if data_array.ndim == 2 else 360,
+                        'nbins': data_array.shape[1] if data_array.ndim == 2 else 120,
+                        'rscale': 75.0  # Valor por defecto, se puede extraer del H5
+                    }
+                    
+                    # Intentar obtener parámetros reales del H5
+                    try:
+                        where_path = f"dataset1/where"
+                        if where_path in h5file:
+                            where_data = h5file[where_path]
+                            if 'nrays' in where_data.attrs:
+                                scan_metadata['nrays'] = int(where_data.attrs['nrays'])
+                            if 'nbins' in where_data.attrs:
+                                scan_metadata['nbins'] = int(where_data.attrs['nbins'])
+                            if 'rscale' in where_data.attrs:
+                                scan_metadata['rscale'] = float(where_data.attrs['rscale'])
+                    except Exception:
+                        pass
+                    
+                    print(f"    Aplicando transformación cartesiana polar (nrays={scan_metadata['nrays']}, nbins={scan_metadata['nbins']}, rscale={scan_metadata['rscale']})...")
+                    # Usar umbral de 8.0 dBZ igual que el docente
+                    # Valores por debajo de 8 dBZ se consideran ruido/sin datos
+                    cart_data, cart_metadata = create_cartesian_data_optimized_new(
+                        data_array,
+                        scan_metadata,
+                        min_dbzh_threshold=8.0,  # 8.0 dBZ como el docente (no -10.0)
+                        resolution_factor=2
+                    )
+                    if cart_data is not None:
+                        data_array = cart_data
+                        max_radius = cart_metadata.get('max_radius', 120000)
+                        print(f"    ✓ Transformación cartesiana aplicada (nuevo shape: {data_array.shape})")
+                    else:
+                        print(f"    ⚠️  No se pudo aplicar transformación, usando datos originales")
+                        max_radius = 120000
                 else:
                     max_radius = 120000
                 
+                lat_array, lon_array = detect_lat_lon(h5file)
                 time_value = detect_time(h5file)
-                if time_value: timestamp = time_value
-            center_lat, center_lon = RADAR_INFO['default_lat'], RADAR_INFO['default_lon']
             
-        png_path, json_path, date_str, _ = build_output_paths(output_dir, radar_id, timestamp)
-        h5_additional_info = extract_h5_additional_info(h5_buffer)
+            if time_value:
+                timestamp = time_value
+            
+            center_lat = RADAR_INFO['default_lat']
+            center_lon = RADAR_INFO['default_lon']
         
-        image = to_rgba(data_array, vmin=vmin, vmax=vmax, transparent_below=transparent_below, cmap_name=cmap)
-        img_width, img_height = image.size
-        bounds_leaflet = calculate_bounds_from_metadata(center_lat, center_lon, max_radius, (img_height, img_width))
+            # Construir rutas de salida
+            png_path, json_path, date_str, _ = build_output_paths(output_dir, radar_id, timestamp)
+            # ✅ VERIFICAR SI YA EXISTE (NUEVO)
+            if png_path.exists() and json_path.exists():
+                # Ya procesado, saltar
+                print(f"⏩ Ya procesado (saltando): {compressed_path.name}")
+                return {
+                    'png': str(png_path),
+                    'json': str(json_path),
+                    'skipped': True
+                }
+            # Extraer información adicional del archivo H5
+            print(f"    Extrayendo información adicional del archivo H5...")
+            h5_additional_info = None
+            try:
+                # Resetear buffer si es posible (BytesIO tiene seek)
+                if hasattr(h5_buffer, 'seek'):
+                    h5_buffer.seek(0)
+                
+                # Extraer información adicional
+                h5_additional_info = extract_h5_additional_info(h5_buffer)
+                
+                if h5_additional_info and (h5_additional_info.get("elevations") or h5_additional_info.get("scan_parameters")):
+                    print(f"    ✓ Información adicional extraída: {len(h5_additional_info.get('elevations', []))} elevaciones")
+                else:
+                    print(f"    ⚠️  No se encontró información adicional en el H5")
+            except Exception as e:
+                print(f"    Advertencia: No se pudo extraer información adicional del H5: {e}")
+                h5_additional_info = None
+            
+            # NOTA: Siempre reprocesa (sobrescribe) archivos existentes para asegurar
+            # que los cambios en el procesamiento se apliquen a todas las imágenes.
+            # Esto permite reprocesar todas las imágenes cuando se actualiza el código.
+            
+            # Convertir a PNG
+            print(f"    Generando imagen PNG...")
+            print(f"    Dimensiones de datos: {data_array.shape}")
+            
+            # Diagnosticar rango de datos antes de aplicar colormap
+            # ⚡ IMPORTANTE: Excluir valores nodata (-999) además de NaN
+            valid_data = data_array[(~np.isnan(data_array)) & (data_array > -900)]
+            if len(valid_data) > 0:
+                print(f"    Rango de datos dBZ válidos: min={np.min(valid_data):.2f}, max={np.max(valid_data):.2f}, mean={np.mean(valid_data):.2f}")
+                print(f"    Total píxeles válidos: {len(valid_data)} de {data_array.size} ({100*len(valid_data)/data_array.size:.1f}%)")
+                print(f"    Valores >60 dBZ: {np.sum(valid_data > 60)} ({100*np.sum(valid_data > 60)/len(valid_data):.1f}%)")
+                print(f"    Valores 50-60 dBZ: {np.sum((valid_data >= 50) & (valid_data <= 60))} ({100*np.sum((valid_data >= 50) & (valid_data <= 60))/len(valid_data):.1f}%)")
+                print(f"    Valores 0-50 dBZ: {np.sum((valid_data >= 0) & (valid_data < 50))} ({100*np.sum((valid_data >= 0) & (valid_data < 50))/len(valid_data):.1f}%)")
+            
+            image = to_rgba(
+                data_array,
+                vmin=0,  # Docente usa 0
+                vmax=80,  # Docente usa 80 dBZ
+                transparent_below=8.0,  # 8.0 dBZ como el docente
+                cmap_name='meteorological'
+            )
+            
+            # Obtener dimensiones reales de la imagen generada
+            img_width, img_height = image.size
+            print(f"    Dimensiones de imagen PNG: {img_width}x{img_height}")
+            
+            # Guardar imagen
+            image.save(png_path, format="PNG")
+            
+            # Calcular bounds en formato Leaflet
+            bounds_leaflet = calculate_bounds_from_metadata(
+                center_lat, center_lon, max_radius, data_array.shape
+            )
+            
+            # Generar metadata con bounds en formato Leaflet, incluyendo precipitación e información adicional
+            metadata_dict = build_metadata(
+                radar_id,
+                dataset_path if not ADVANCED_FUNCTIONS_AVAILABLE else 'DBZH',
+                data_array,
+                timestamp,
+                date_str,
+                bounds_leaflet,  # Usar bounds en formato Leaflet
+                argparse.Namespace(
+                    input=str(compressed_path),
+                    vmin=vmin,
+                    vmax=vmax,
+                    transparent_below=transparent_below,
+                    cmap=cmap
+                ),
+                png_path,
+                h5_additional_info=h5_additional_info,
+                h5_buffer=h5_buffer
+            )
         
-        image.save(png_path, format="PNG")
+        # Asegurar que bounds estén en el formato correcto
+        if 'bounds' in metadata_dict:
+            # Si bounds está en formato {southWest, northEast}, convertir a formato Leaflet
+            if isinstance(metadata_dict['bounds'], dict):
+                sw = metadata_dict['bounds'].get('southWest', [])
+                ne = metadata_dict['bounds'].get('northEast', [])
+                if sw and ne:
+                    metadata_dict['bounds'] = [sw, ne]
         
-        metadata_dict = build_metadata(radar_id, dataset_path, data_array, timestamp, date_str, bounds_leaflet,
-                                     argparse.Namespace(input=str(compressed_path), vmin=vmin, vmax=vmax, transparent_below=transparent_below, cmap=cmap),
-                                     png_path, h5_additional_info=h5_additional_info, h5_buffer=h5_buffer)
+        # Agregar información adicional del radar
+        metadata_dict['radar_info'] = {
+            'id': RADAR_INFO['id'],
+            'name': RADAR_INFO['name'],
+            'lat': center_lat,
+            'lon': center_lon,
+            'height': metadata.get('height', RADAR_INFO['default_height']) if ADVANCED_FUNCTIONS_AVAILABLE else RADAR_INFO['default_height']
+        }
         
-        if 'bounds' in metadata_dict and isinstance(metadata_dict['bounds'], dict):
-            metadata_dict['bounds'] = [metadata_dict['bounds'].get('southWest', []), metadata_dict['bounds'].get('northEast', [])]
+        # Agregar dimensiones de la imagen para referencia
+        metadata_dict['image_dimensions'] = {
+            'width': img_width,
+            'height': img_height,
+            'aspect_ratio': img_width / img_height if img_height > 0 else 1.0
+        }
         
-        metadata_dict['radar_info'] = {'id': RADAR_INFO['id'], 'name': RADAR_INFO['name'], 'lat': center_lat, 'lon': center_lon, 'height': RADAR_INFO['default_height']}
-        metadata_dict['image_dimensions'] = {'width': img_width, 'height': img_height, 'aspect_ratio': img_width/img_height if img_height > 0 else 1.0}
-        
+        # Guardar metadata
         json_path.write_text(json.dumps(metadata_dict, ensure_ascii=False, indent=2), encoding="utf-8")
         
-        return {'png': str(png_path), 'json': str(json_path), 'metadata': metadata_dict}
+        print(f"✓ Convertido: {compressed_path.name} -> {png_path.name}")
+        print(f"  Bounds: {bounds_leaflet}")
+        return {
+            'png': str(png_path),
+            'json': str(json_path),
+            'metadata': metadata_dict
+        }
         
     except Exception as e:
-        print(f"Error procesando: {e}")
+        print(f"Error procesando H5 desde {compressed_path}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
-def process_directory(input_dir, output_dir, radar_id='LOXX', clutter_dir=None, clutter_cache_file=None,
-                    vmin=10.0, vmax=70.0, transparent_below=8.0, cmap='meteorological', default_bounds=None, recursive=True):
+def process_directory(input_dir, output_dir, radar_id='LOXX',
+                    clutter_dir=None, clutter_cache_file=None,
+                    vmin=10.0, vmax=70.0, transparent_below=8.0, 
+                    cmap='meteorological', default_bounds=None, recursive=True):
+    """
+    Procesa todos los archivos comprimidos en un directorio usando enfoque avanzado
+    """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Cargar mapas de clutter si están disponibles
+    clutter_maps = None
+    if clutter_dir and ADVANCED_FUNCTIONS_AVAILABLE:
+        if clutter_cache_file and os.path.exists(clutter_cache_file):
+            clutter_maps, _ = load_clutter_cache(clutter_cache_file)
+        if clutter_maps is None and clutter_dir:
+            print("Generando mapas de clutter...")
+            clutter_maps, _ = generate_clutter_maps(clutter_dir, data_number=2)
+            if clutter_maps and clutter_cache_file:
+                save_clutter_cache(clutter_maps, {}, clutter_cache_file)
+    
+    # Extensiones de archivos comprimidos
     compressed_extensions = ['.zip', '.gz', '.tar', '.tgz', '.tar.gz']
-    compressed_files = []
+    
+    # Buscar archivos comprimidos
     if recursive:
-        for ext in compressed_extensions: compressed_files.extend(input_dir.rglob(f'*{ext}'))
+        compressed_files = []
+        for ext in compressed_extensions:
+            compressed_files.extend(input_dir.rglob(f'*{ext}'))
     else:
-        for ext in compressed_extensions: compressed_files.extend(input_dir.glob(f'*{ext}'))
+        compressed_files = []
+        for ext in compressed_extensions:
+            compressed_files.extend(input_dir.glob(f'*{ext}'))
+    
+    if not compressed_files:
+        print(f"No se encontraron archivos comprimidos en {input_dir}")
+        return []
+    
+    print(f"Encontrados {len(compressed_files)} archivos comprimidos")
     
     results = []
-    for compressed_file in compressed_files:
-        result = process_compressed_h5(compressed_file, output_dir, radar_id, None, clutter_dir, vmin, vmax, transparent_below, cmap, default_bounds)
-        if result: results.append(result)
+    skipped_count = 0
+    error_count = 0
+    
+    for i, compressed_file in enumerate(compressed_files, 1):
+        if i % 100 == 0:  # Progreso cada 100 archivos
+            print(f"Progreso: {i}/{len(compressed_files)} archivos procesados...")
+        
+        result = process_compressed_h5(
+            compressed_file,
+            output_dir,
+            radar_id,
+            clutter_maps,
+            clutter_dir,
+            vmin, vmax, transparent_below, cmap, default_bounds
+        )
+        if result:
+            if result.get('skipped'):
+                skipped_count += 1
+            else:
+                results.append(result)
+        else:
+            error_count += 1
+    
+    # Mostrar resumen
+    print(f"\n{'='*60}")
+    print(f"RESUMEN DE PROCESAMIENTO:")
+    print(f"  Total archivos encontrados: {len(compressed_files)}")
+    print(f"  ✓ Procesados exitosamente: {len(results)}")
+    print(f"  ⏩ Ya existían (saltados): {skipped_count}")
+    print(f"  ✗ Errores/corruptos: {error_count}")
+    print(f"{'='*60}\n")
+    
     return results
 
+
+def start_polling_mode(input_dir, output_dir, radar_id, clutter_dir, clutter_cache,
+                       vmin, vmax, transparent_below, cmap, default_bounds, poll_interval=30):
+    """
+    Modo de monitoreo usando POLLING (escaneo periódico)
+    Útil para directorios de red donde watchdog no funciona
+    """
+    print("\n" + "="*70)
+    print("MODO POLLING (para directorios de red)")
+    print("="*70)
+    
+    # Cargar clutter maps
+    clutter_maps = None
+    if clutter_cache and Path(clutter_cache).exists():
+        clutter_maps, _ = load_clutter_cache(clutter_cache)
+    if clutter_maps is None and clutter_dir and Path(clutter_dir).exists():
+        print("Generando mapas de clutter DBZH...")
+        clutter_maps, _ = generate_clutter_maps(clutter_dir, data_number=2)
+        if clutter_maps and clutter_cache:
+            save_clutter_cache(clutter_maps, _, clutter_cache)
+    
+    if clutter_maps:
+        print(f"✓ Mapas de clutter cargados: {len(clutter_maps)} datasets")
+    else:
+        print("⚠️  Procesando sin corrección de clutter")
+        clutter_maps = {}
+    
+    print("="*70 + "\n")
+    
+    # Estado: archivos ya procesados
+    processed_files = set()
+    
+    print("=" * 60)
+    print("INICIANDO MONITOREO POR POLLING")
+    print("=" * 60)
+    print(f"Directorio H5: {input_dir}")
+    print(f"Directorio PNG: {output_dir}")
+    print(f"Radar ID: {radar_id}")
+    print(f"Intervalo de escaneo: {poll_interval} segundos")
+    print("=" * 60)
+    print("Presiona Ctrl+C para detener")
+    print("=" * 60)
+    print()
+    
+    cycle = 0
+    
+    try:
+        while True:
+            cycle += 1
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[{now}] Ciclo #{cycle}: Escaneando...")
+            
+            # Buscar archivos H5 comprimidos
+            input_path = Path(input_dir)
+            h5_files = []
+            
+            for ext in ['.h5.gz', '.h5.zip', '.gz']:
+                if ext == '.gz':
+                    found = list(input_path.rglob('*.gz'))
+                    h5_files.extend([f for f in found if '.h5' in f.name.lower()])
+                else:
+                    h5_files.extend(input_path.rglob(f'*{ext}'))
+            
+            # Filtrar nuevos
+            new_files = [f for f in h5_files if str(f) not in processed_files]
+            
+            if new_files:
+                # Ordenar por fecha (más recientes primero)
+                new_files.sort(key=lambda f: f.stat().st_mtime, reverse=True)
+                
+                print(f"  📁 Nuevos: {len(new_files)} (procesando los 5 más recientes)")
+                
+                # Procesar solo los 5 más recientes
+                for i, file_path in enumerate(new_files[:5], 1):
+                    print(f"\n  [{i}/5] {file_path.name}")
+                    
+                    result = process_compressed_h5(
+                        str(file_path),
+                        output_dir,
+                        radar_id,
+                        clutter_maps,
+                        clutter_dir,
+                        vmin, vmax, transparent_below, cmap, default_bounds
+                    )
+                    
+                    if result:
+                        if result.get('skipped'):
+                            print(f"    ⏩ Ya existía")
+                        else:
+                            print(f"    ✓ Procesado: {Path(result['png']).name}")
+                        processed_files.add(str(file_path))
+                    else:
+                        print(f"    ✗ Error")
+                
+                print(f"\n  ✓ Ciclo #{cycle} completado")
+            else:
+                print(f"  ✓ Sin archivos nuevos")
+            
+            print(f"  💤 Esperando {poll_interval}s...\n")
+            time.sleep(poll_interval)
+            
+    except KeyboardInterrupt:
+        print("\n\n🛑 Detenido por usuario")
+        print(f"Archivos procesados: {len(processed_files)}")
+
+
+def start_watch_mode(input_dir, output_dir, radar_id, clutter_dir, clutter_cache,
+                     vmin, vmax, transparent_below, cmap, default_bounds, debounce_time, process_existing=True, use_polling=False):
+    """
+    Inicia el modo de monitoreo automático usando watchdog o polling
+    
+    Args:
+        process_existing: Si es True, procesa todos los archivos existentes antes de iniciar el monitoreo
+        use_polling: Si es True, usa polling en lugar de watchdog (útil para directorios de red)
+    """
+    # Auto-detectar si es directorio de red y usar polling
+    input_path = Path(input_dir)
+    is_network_drive = str(input_path.resolve()).startswith('\\\\') or str(input_path).startswith('F:')
+    
+    if use_polling or is_network_drive:
+        if is_network_drive and not use_polling:
+            print("⚠️  Directorio de red detectado, usando POLLING en lugar de watchdog")
+        return start_polling_mode(input_dir, output_dir, radar_id, clutter_dir, clutter_cache,
+                                vmin, vmax, transparent_below, cmap, default_bounds, poll_interval=30)
+    
+    try:
+        from watchdog.observers import Observer
+        from watchdog.events import FileSystemEventHandler, FileSystemEvent
+    except ImportError:
+        print("ERROR: watchdog no está instalado. Instálalo con: pip install watchdog")
+        sys.exit(1)
+    
+    # ====================================================================
+    # CARGAR MAPAS DE CLUTTER - IGUAL QUE EL DOCENTE
+    # ====================================================================
+    print("\n" + "="*70)
+    print("CARGANDO MAPAS DE CLUTTER DBZH...")
+    print("="*70)
+    
+    clutter_maps = None
+    global_metadata = None
+    
+    # Intentar cargar desde cache primero
+    if clutter_cache and Path(clutter_cache).exists():
+        clutter_maps, global_metadata = load_clutter_cache(clutter_cache)
+    
+    # Si no hay cache o falló, generar nuevos mapas
+    if clutter_maps is None and clutter_dir and Path(clutter_dir).exists():
+        print("Generando mapas de clutter DBZH...")
+        clutter_maps, global_metadata = generate_clutter_maps(clutter_dir, data_number=2)
+        
+        # Guardar en cache si se generaron exitosamente
+        if clutter_maps and clutter_cache:
+            save_clutter_cache(clutter_maps, global_metadata, clutter_cache)
+    
+    if clutter_maps:
+        print(f"✓ Mapas de clutter cargados: {len(clutter_maps)} datasets")
+        for key in clutter_maps:
+            shape = clutter_maps[key].shape
+            print(f"  - {key}: {shape}")
+    else:
+        print("⚠️  No se pudieron cargar mapas de clutter. Procesando sin corrección de clutter.")
+        clutter_maps = {}
+    
+    print("="*70 + "\n")
+    
+    # Procesar archivos existentes primero
+    if process_existing:
+        print("=" * 60)
+        print("PROCESANDO ARCHIVOS EXISTENTES")
+        print("=" * 60)
+        print(f"Buscando archivos H5 comprimidos en: {input_dir}")
+        
+        input_path = Path(input_dir)
+        if not input_path.exists():
+            print(f"ERROR: El directorio {input_dir} no existe")
+            sys.exit(1)
+        
+        # Buscar archivos comprimidos
+        compressed_extensions = ['.h5.gz', '.h5.zip', '.gz']
+        existing_files = []
+        
+        for ext in compressed_extensions:
+            if ext == '.gz':
+                # Buscar archivos .gz que contengan .h5 en el nombre
+                existing_files.extend(input_path.rglob('*.gz'))
+            else:
+                existing_files.extend(input_path.rglob(f'*{ext}'))
+        
+        # Filtrar solo archivos H5 comprimidos
+        h5_files = []
+        for file_path in existing_files:
+            name = file_path.name.lower()
+            if (name.endswith('.h5.gz') or 
+                name.endswith('.h5.zip') or
+                (name.endswith('.gz') and '.h5' in name)):
+                h5_files.append(file_path)
+        
+        if h5_files:
+            print(f"Encontrados {len(h5_files)} archivos H5 comprimidos para procesar")
+            print("Procesando archivos existentes...")
+            print("")
+            
+            # Procesar archivos existentes
+            results = process_directory(
+                input_dir,
+                output_dir,
+                radar_id,
+                clutter_dir,
+                clutter_cache,
+                vmin, vmax, transparent_below, cmap, default_bounds,
+                recursive=True  # Buscar recursivamente
+            )
+            
+            print("")
+            print("=" * 60)
+            print(f"✓ Procesados {len(results)} archivos existentes")
+            print("=" * 60)
+            print("")
+        else:
+            print("No se encontraron archivos H5 comprimidos existentes")
+            print("")
+    
+    # Ahora iniciar el monitoreo para nuevos archivos
+    
+    class H5Handler(FileSystemEventHandler):
+        """Maneja eventos de archivos H5 comprimidos nuevos"""
+        
+        def __init__(self, config):
+            self.config = config
+            self.processing = set()
+            self.debounce_time = config.get('debounce_time', 5.0)
+            self.debounce_timers = {}
+            # ⚡ ThreadPoolExecutor para procesamiento asíncrono (máx 3 workers)
+            # Esto evita que el watchdog se bloquee durante procesamiento pesado
+            from concurrent.futures import ThreadPoolExecutor
+            self.executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="h5_processor")
+            
+        def on_created(self, event: FileSystemEvent):
+            """Se llama cuando se crea un nuevo archivo"""
+            if event.is_directory:
+                return
+            
+            file_path = Path(event.src_path)
+            if not self._is_h5_compressed(file_path):
+                return
+            
+            self._schedule_processing(file_path)
+        
+        def on_modified(self, event: FileSystemEvent):
+            """Se llama cuando se modifica un archivo"""
+            if event.is_directory:
+                return
+            
+            file_path = Path(event.src_path)
+            if not self._is_h5_compressed(file_path):
+                return
+            
+            if file_path not in self.processing:
+                self._schedule_processing(file_path)
+        
+        def _is_h5_compressed(self, file_path: Path):
+            """Verifica si el archivo es un H5 comprimido"""
+            if file_path.suffix.lower() not in ['.gz', '.zip']:
+                return False
+            
+            return (file_path.name.endswith('.h5.gz') or 
+                    file_path.name.endswith('.h5.zip') or
+                    (file_path.suffix.lower() == '.gz' and '.h5' in file_path.stem))
+        
+        def _schedule_processing(self, file_path: Path):
+            """Programa el procesamiento de un archivo con debounce"""
+            normalized = file_path.resolve()
+            
+            # Cancelar timer anterior si existe
+            if normalized in self.debounce_timers:
+                self.debounce_timers[normalized].cancel()
+            
+            # Programar nuevo procesamiento
+            timer = threading.Timer(self.debounce_time, self._process_file, args=(normalized,))
+            timer.start()
+            self.debounce_timers[normalized] = timer
+        
+        def _process_file(self, file_path: Path):
+            """Procesa un archivo H5 comprimido (programar en background)"""
+            normalized = file_path.resolve()
+            
+            if normalized in self.processing:
+                print(f"[watch] {file_path.name} ya está siendo procesado, omitiendo...")
+                return
+            
+            # Verificar que el archivo existe y no está siendo escrito
+            if not normalized.exists():
+                print(f"[watch] Archivo no encontrado: {file_path.name}")
+                return
+            
+            # Verificar estabilidad del archivo (tamaño constante indica que terminó de escribirse)
+            # NOTA: No usar st_mtime porque archivos de PCs remotos pueden tener timestamps incorrectos
+            try:
+                initial_size = normalized.stat().st_size
+                time.sleep(1.0)  # Esperar 1 segundo
+                current_size = normalized.stat().st_size
+                
+                if initial_size != current_size:
+                    print(f"[watch] Archivo aún se está escribiendo: {file_path.name} (tamaño cambió de {initial_size} a {current_size} bytes)")
+                    # Reprogramar para más tarde
+                    timer = threading.Timer(3.0, self._process_file, args=(normalized,))
+                    timer.start()
+                    self.debounce_timers[normalized] = timer
+                    return
+                else:
+                    print(f"[watch] Archivo estable, procediendo a procesar: {file_path.name} ({current_size} bytes)")
+            except Exception as e:
+                print(f"[watch] Advertencia verificando archivo {file_path.name}: {e}")
+                print(f"[watch] Procediendo a procesar de todos modos...")
+                # No retornar, proceder de todos modos (fail-safe)
+            
+            # Marcar como en procesamiento
+            self.processing.add(normalized)
+            
+            # ⚡ Enviar a thread pool para procesamiento asíncrono
+            # Esto libera el watchdog inmediatamente para seguir detectando archivos
+            print(f"[watch] Enviando {file_path.name} a ThreadPool para procesamiento...")
+            self.executor.submit(self._process_file_async, normalized)
+        
+        def _process_file_async(self, file_path: Path):
+            """Procesa un archivo H5 comprimido en background thread"""
+            try:
+                print(f"[watch-async] Iniciando procesamiento H5: {file_path.name}")
+                
+                # Llamar directamente a process_compressed_h5
+                result = process_compressed_h5(
+                    str(file_path),
+                    self.config['output_dir'],
+                    self.config['radar_id'],
+                    self.config.get('clutter_maps', {}),  # ⚡ Usar clutter maps cargados
+                    self.config.get('clutter_dir'),
+                    self.config['vmin'],
+                    self.config['vmax'],
+                    self.config['transparent_below'],
+                    self.config['cmap'],
+                    self.config.get('default_bounds')
+                )
+                
+                if result:
+                    if result.get('skipped'):
+                        print(f"[watch-async] ⏩ Ya existía (saltado): {file_path.name}")
+                    else:
+                        print(f"[watch-async] ✓ Procesado exitosamente: {file_path.name} -> {Path(result['png']).name}")
+                else:
+                    print(f"[watch-async] ✗ Error procesando {file_path.name}")
+            
+            except Exception as e:
+                print(f"[watch-async] ✗ Error procesando {file_path.name}: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # Remover de la lista de procesamiento
+                self.processing.discard(file_path)
+                if file_path in self.debounce_timers:
+                    del self.debounce_timers[file_path]
+    
+    # Crear directorio de salida si no existe
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    
+    # Configurar handler
+    handler = H5Handler({
+        'output_dir': output_dir,
+        'radar_id': radar_id,
+        'clutter_dir': clutter_dir,
+        'clutter_maps': clutter_maps,  # ⚡ Pasar clutter maps cargados
+        'vmin': vmin,
+        'vmax': vmax,
+        'transparent_below': transparent_below,
+        'cmap': cmap,
+        'default_bounds': default_bounds,
+        'debounce_time': debounce_time,
+    })
+    
+    # Iniciar observador
+    observer = Observer()
+    observer.schedule(handler, str(input_dir), recursive=True)
+    observer.start()
+    
+    print("=" * 60)
+    print("MODO MONITOREO ACTIVO")
+    print("=" * 60)
+    print(f"Directorio H5: {input_dir}")
+    print(f"Directorio PNG: {output_dir}")
+    print(f"Radar ID: {radar_id}")
+    print(f"Tiempo de espera: {debounce_time} segundos")
+    print("=" * 60)
+    print("Esperando nuevos archivos H5 comprimidos...")
+    print("Presiona Ctrl+C para detener")
+    print("=" * 60)
+    
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n[watch] Deteniendo monitoreo...")
+        observer.stop()
+        observer.join()
+        print("[watch] Monitoreo detenido")
+
+
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Procesa archivos H5 comprimidos del radar LOXX')
-    parser.add_argument('--input-dir', default='F:\\LOXX\\H5')
-    parser.add_argument('--input-file')
-    parser.add_argument('--output-dir', required=True)
-    parser.add_argument('--radar-id', default='LOXX')
-    parser.add_argument('--clutter-dir')
-    parser.add_argument('--clutter-cache')
-    parser.add_argument('--vmin', type=float, default=10.0)
-    parser.add_argument('--vmax', type=float, default=70.0)
-    parser.add_argument('--transparent-below', type=float, default=8.0)
-    parser.add_argument('--cmap', default='meteorological')
-    parser.add_argument('--default-bounds')
-    parser.add_argument('--recursive', action='store_true')
-    parser.add_argument('--watch', action='store_true')
-    parser.add_argument('--debounce-time', type=float, default=5.0)
-    parser.add_argument('--skip-existing', action='store_true')
+    args = None
+    
+    # Si se ejecuta sin argumentos y no hay --watch, mostrar ayuda
+    if len(sys.argv) == 1:
+        print("Uso:")
+        print("  Modo monitoreo (recomendado):")
+        print("    python process_loxx_h5_compressed.py --watch --input-dir F:\\LOXX\\H5 --output-dir F:\\LOXX\\PNG_OUTPUT")
+        print("")
+        print("  Procesar un archivo:")
+        print("    python process_loxx_h5_compressed.py --input-file archivo.h5.gz --output-dir F:\\LOXX\\PNG_OUTPUT")
+        print("")
+        print("  Procesar directorio completo:")
+        print("    python process_loxx_h5_compressed.py --input-dir F:\\LOXX\\H5 --output-dir F:\\LOXX\\PNG_OUTPUT --recursive")
+        print("")
+        print("Usa --help para ver todas las opciones")
+        sys.exit(0)
+    
+    # Parsear argumentos
+    parser = argparse.ArgumentParser(
+        description='Procesa archivos H5 comprimidos del radar LOXX (versión avanzada)'
+    )
+    parser.add_argument(
+        '--input-dir',
+        default='F:\\LOXX\\H5',
+        help='Directorio con archivos comprimidos (default: F:\\LOXX\\H5)'
+    )
+    parser.add_argument(
+        '--input-file',
+        help='Archivo comprimido específico a procesar'
+    )
+    parser.add_argument(
+        '--output-dir',
+        required=True,
+        help='Directorio de salida para PNGs'
+    )
+    parser.add_argument(
+        '--radar-id',
+        default='LOXX',
+        help='ID del radar (default: LOXX)'
+    )
+    parser.add_argument(
+        '--clutter-dir',
+        help='Directorio con archivos de referencia para clutter (opcional)'
+    )
+    parser.add_argument(
+        '--clutter-cache',
+        help='Archivo de cache para mapas de clutter (opcional)'
+    )
+    parser.add_argument(
+        '--vmin',
+        type=float,
+        default=10.0,
+        help='Valor mínimo para colormap (default: 10.0)'
+    )
+    parser.add_argument(
+        '--vmax',
+        type=float,
+        default=70.0,
+        help='Valor máximo para colormap (default: 70.0)'
+    )
+    parser.add_argument(
+        '--transparent-below',
+        type=float,
+        default=8.0,
+        help='Valores menores serán transparentes (default: 8.0)'
+    )
+    parser.add_argument(
+        '--cmap',
+        default='meteorological',
+        help='Colormap: "meteorological" (escala DBZH), "turbo", "viridis", etc. (default: meteorological)'
+    )
+    parser.add_argument(
+        '--default-bounds',
+        help='Bounds por defecto latMin,latMax,lonMin,lonMax'
+    )
+    parser.add_argument(
+        '--recursive',
+        action='store_true',
+        help='Buscar archivos recursivamente en subdirectorios'
+    )
+    parser.add_argument(
+        '--watch',
+        action='store_true',
+        help='Modo monitoreo: escucha nuevos archivos H5 y los procesa automáticamente'
+    )
+    parser.add_argument(
+        '--debounce-time',
+        type=float,
+        default=5.0,
+        help='Tiempo de espera antes de procesar archivo nuevo (segundos, default: 5.0)'
+    )
+    parser.add_argument(
+        '--skip-existing',
+        action='store_true',
+        help='En modo --watch, saltar el procesamiento de archivos existentes (solo monitorear nuevos)'
+    )
     
     args = parser.parse_args()
     
-    if args.input_file:
-        process_compressed_h5(args.input_file, args.output_dir, args.radar_id, None, args.clutter_dir, args.vmin, args.vmax, args.transparent_below, args.cmap, None)
-    elif args.input_dir:
-        process_directory(args.input_dir, args.output_dir, args.radar_id, None, None, args.vmin, args.vmax, args.transparent_below, args.cmap, None, args.recursive)
+    # Parsear bounds si se proporcionan
+    default_bounds = None
+    if args.default_bounds:
+        parts = [float(x) for x in args.default_bounds.split(',')]
+        if len(parts) == 4:
+            default_bounds = {
+                'latMin': parts[0],
+                'latMax': parts[1],
+                'lonMin': parts[2],
+                'lonMax': parts[3]
+            }
+    
+    # Si está en modo watch, iniciar monitoreo
+    if args.watch:
+        start_watch_mode(
+            args.input_dir,
+            args.output_dir,
+            args.radar_id,
+            args.clutter_dir,
+            args.clutter_cache,
+            args.vmin,
+            args.vmax,
+            args.transparent_below,
+            args.cmap,
+            default_bounds,
+            args.debounce_time,
+            process_existing=not args.skip_existing  # Procesar existentes a menos que se use --skip-existing
+        )
+    elif args.input_file:
+        # Procesar un archivo específico
+        result = process_compressed_h5(
+            args.input_file,
+            args.output_dir,
+            args.radar_id,
+            None,  # clutter_maps
+            args.clutter_dir,
+            args.vmin, args.vmax, args.transparent_below, args.cmap, default_bounds
+        )
+        if result:
+            print(f"✓ Procesado exitosamente: {result['png']}")
+        else:
+            print("✗ Error procesando archivo")
+            sys.exit(1)
+    else:
+        # Procesar directorio completo
+        results = process_directory(
+            args.input_dir,
+            args.output_dir,
+            args.radar_id,
+            args.clutter_dir,
+            args.clutter_cache,
+            args.vmin, args.vmax, args.transparent_below, args.cmap, default_bounds,
+            args.recursive
+        )
+        print(f"\n✓ Procesados {len(results)} archivos exitosamente")

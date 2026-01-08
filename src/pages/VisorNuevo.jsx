@@ -15,12 +15,14 @@ const VisorNuevo = () => {
     const [loading, setLoading] = useState(false);
     const [showLguaxx, setShowLguaxx] = useState(true);
     const [showLoxx, setShowLoxx] = useState(true);
+    const [timeInterval, setTimeInterval] = useState(''); // '', '1h', '3h', '6h', '12h', '24h'
     const [cacheBuster, setCacheBuster] = useState(Date.now());
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false); // Estado sidebar móvil
     const intervalRef = useRef(null);
 
     useEffect(() => {
         loadFrames();
-    }, []);
+    }, [timeInterval]); // Recargar cuando cambia el intervalo
 
     const loadFrames = async () => {
         setLoading(true);
@@ -36,25 +38,44 @@ const VisorNuevo = () => {
         console.log(`[VisorNuevo] Cargando frames para ${today} Ecuador`);
 
         try {
-            // ⚡ LGUAXX: Usar endpoint optimizado (igual que LOXX)
-            const lguaxxResponse = await fetch(`/api/radar/LGUAXX/pngs/viewer-frames?t=${cacheBuster}`);
+            // ⚡ LGUAXX: Usar endpoint con intervalo si está seleccionado
+            let lguaxxApiUrl = `/api/radar/LGUAXX/pngs/viewer-frames?t=${cacheBuster}`;
+            if (timeInterval) {
+                // Usar nuevo endpoint que filtra desde el último frame hacia atrás
+                lguaxxApiUrl = `/api/radar/LGUAXX/pngs/recent?hours=${timeInterval}&t=${cacheBuster}`;
+            }
+
+            const lguaxxResponse = await fetch(lguaxxApiUrl);
             const lguaxxData = await lguaxxResponse.json();
 
             let lguaxxFramesArray = [];
             if (lguaxxData.frames && lguaxxData.frames.length > 0) {
-                const todayFrames = lguaxxData.frames.filter(frame => {
-                    const frameDate = new Date(frame.timestamp);
-                    const ecuadorMs = frameDate.getTime() - (5 * 60 * 60 * 1000);
-                    const ecuadorDate = new Date(ecuadorMs);
-                    const frameDateStr = ecuadorDate.toISOString().split('T')[0];
-                    return frameDateStr === today;
-                });
+                // Si usamos el endpoint /recent, ya viene filtrado por el backend
+                let filteredFrames = lguaxxData.frames;
 
-                todayFrames.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                // Si NO usamos intervalo, filtrar por fecha del día actual
+                // IMPORTANTE: Usar getFullYear/getMonth/getDate en lugar de toISOString
+                // para comparar en hora local, no UTC
+                if (!timeInterval) {
+                    filteredFrames = lguaxxData.frames.filter(frame => {
+                        const frameDate = new Date(frame.timestamp);
+                        // Convertir a hora local Ecuador (UTC-5)
+                        const ecuadorMs = frameDate.getTime() - (5 * 60 * 60 * 1000);
+                        const ecuadorDate = new Date(ecuadorMs);
+                        // Comparar fecha en hora local
+                        const frameYear = ecuadorDate.getUTCFullYear();
+                        const frameMonth = ecuadorDate.getUTCMonth() + 1;
+                        const frameDay = ecuadorDate.getUTCDate();
+                        const frameDateStr = `${frameYear}-${String(frameMonth).padStart(2, '0')}-${String(frameDay).padStart(2, '0')}`;
+                        return frameDateStr === today;
+                    });
+                }
 
-                const framesWithBounds = todayFrames.map(f => ({
+                filteredFrames.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                const framesWithBounds = filteredFrames.map(f => ({
                     ...f,
-                    imageUrl: `/api/radar/pngs/${f.id}/image?t=${cacheBuster}`, // Add imageUrl here
+                    imageUrl: `/api/radar/pngs/${f.id}/image?t=${cacheBuster}`,
                     bounds: f.bounds?.northEast && f.bounds?.southWest
                         ? [[f.bounds.southWest[0], f.bounds.southWest[1]], [f.bounds.northEast[0], f.bounds.northEast[1]]]
                         : [[-4.944622, -80.770709], [-3.136104, -78.967612]]
@@ -62,39 +83,57 @@ const VisorNuevo = () => {
 
                 lguaxxFramesArray = framesWithBounds;
                 setLguaxxFrames(framesWithBounds);
-                console.log(`✅ LGUAXX: ${framesWithBounds.length} frames para ${today}`);
+                const intervalMsg = timeInterval ? `(últimas ${timeInterval}h)` : `para ${today}`;
+                console.log(`✅ LGUAXX: ${framesWithBounds.length} frames ${intervalMsg}`);
             } else {
                 setLguaxxFrames([]);
             }
-            // ⚡ LOXX: Usar endpoint optimizado
-            const loxxResponse = await fetch(`/api/radar/LOXX/pngs/viewer-frames?t=${cacheBuster}`);
+            // ⚡ LOXX: Usar endpoint con intervalo si está seleccionado (igual que LGUAXX)
+            let loxxApiUrl = `/api/radar/LOXX/pngs/viewer-frames?t=${cacheBuster}`;
+            if (timeInterval) {
+                // Usar endpoint que filtra desde el último frame hacia atrás
+                loxxApiUrl = `/api/radar/LOXX/pngs/recent?hours=${timeInterval}&t=${cacheBuster}`;
+            }
+
+            const loxxResponse = await fetch(loxxApiUrl);
             const loxxData = await loxxResponse.json();
 
             let loxxFramesArray = [];
             if (loxxData.frames && loxxData.frames.length > 0) {
-                // Filtrar frames por fecha Ecuador (cliente hace la conversión timezone)
-                const todayFrames = loxxData.frames.filter(frame => {
-                    const frameDate = new Date(frame.timestamp);
-                    // Convertir UTC a Ecuador (UTC-5)
-                    const ecuadorMs = frameDate.getTime() - (5 * 60 * 60 * 1000);
-                    const ecuadorDate = new Date(ecuadorMs);
-                    const frameDateStr = ecuadorDate.toISOString().split('T')[0];
-                    return frameDateStr === today;
-                });
+                // Usar la misma lógica que LGUAXX - CON filtro de fecha
+                let filteredFrames = loxxData.frames;
+
+                // Si NO usamos intervalo, filtrar por fecha del día actual
+                // IMPORTANTE: Usar getFullYear/getMonth/getDate en hora local Ecuador
+                if (!timeInterval) {
+                    filteredFrames = loxxData.frames.filter(frame => {
+                        const frameDate = new Date(frame.timestamp);
+                        // Convertir a hora local Ecuador (UTC-5)
+                        const ecuadorMs = frameDate.getTime() - (5 * 60 * 60 * 1000);
+                        const ecuadorDate = new Date(ecuadorMs);
+                        // Comparar fecha en hora local
+                        const frameYear = ecuadorDate.getUTCFullYear();
+                        const frameMonth = ecuadorDate.getUTCMonth() + 1;
+                        const frameDay = ecuadorDate.getUTCDate();
+                        const frameDateStr = `${frameYear}-${String(frameMonth).padStart(2, '0')}-${String(frameDay).padStart(2, '0')}`;
+                        return frameDateStr === today;
+                    });
+                }
 
                 // Ordenar por timestamp ascendente
-                todayFrames.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                filteredFrames.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-                const framesWithBounds = todayFrames.map(f => ({
+                const framesWithBounds = filteredFrames.map(f => ({
                     ...f,
                     bounds: f.bounds?.northEast && f.bounds?.southWest
                         ? [[f.bounds.southWest[0], f.bounds.southWest[1]], [f.bounds.northEast[0], f.bounds.northEast[1]]]
-                        : [[-5.077081, -80.286881], [-2.914919, -78.124719]]
+                        : [[-4.344, -79.444], [-3.644, -78.744]] // LOXX bounds por defecto
                 }));
 
                 loxxFramesArray = framesWithBounds;
                 setLoxxFrames(framesWithBounds);
-                console.log(`✅ LOXX: ${framesWithBounds.length} frames para ${today}`);
+                const intervalMsg = timeInterval ? `(últimas ${timeInterval}h)` : `del día`;
+                console.log(`✅ LOXX: ${framesWithBounds.length} frames ${intervalMsg}`);
             } else {
                 setLoxxFrames([]);
                 console.log('⚠️ No hay frames LOXX disponibles');
@@ -268,13 +307,6 @@ const VisorNuevo = () => {
         timeStyle: 'medium'
     }) : new Date().toLocaleDateString('es-EC', { dateStyle: 'full' });
 
-    // 📅 Hora local Ecuador (hora del sistema del usuario)
-    const localEcuadorTime = new Date().toLocaleString('es-EC', {
-        dateStyle: 'full',
-        timeStyle: 'short',
-        hour12: true
-    });
-
     // Función para extraer hora del filename (tiene la hora local correcta)
     const extractTimeFromFilename = (filename) => {
         if (!filename) return null;
@@ -309,71 +341,43 @@ const VisorNuevo = () => {
         return null;
     };
 
-    // ⏰ Última captura del radar (extraer del frame MÁS RECIENTE por timestamp)
+    // ⏰ Hora de captura del frame ACTUAL que se está viendo (dinámico durante reproducción)
     const radarCaptureTime = (() => {
-        // Función auxiliar para encontrar el frame más reciente en un array
-        const getMostRecentFrame = (frames) => {
-            if (!frames || frames.length === 0) return null;
-            return frames.reduce((latest, current) => {
-                const latestTime = new Date(latest.timestamp).getTime();
-                const currentTime = new Date(current.timestamp).getTime();
-                return currentTime > latestTime ? current : latest;
-            });
-        };
-
-        let lastFrame = null;
-        if (showLguaxx && !showLoxx && lguaxxFrames.length > 0) {
-            // Solo GUAXX visible - buscar el más reciente
-            lastFrame = getMostRecentFrame(lguaxxFrames);
-            console.log('[VisorNuevo] Último frame GUAXX:', lastFrame);
-        } else if (showLoxx && !showLguaxx && loxxFrames.length > 0) {
-            // Solo LOXX visible - buscar el más reciente
-            lastFrame = getMostRecentFrame(loxxFrames);
-            console.log('[VisorNuevo] Último frame LOXX:', lastFrame);
-        } else if (showLguaxx && showLoxx) {
-            // Ambos visibles: comparar el más reciente de cada uno
-            const lastLoxx = getMostRecentFrame(loxxFrames);
-            const lastLguaxx = getMostRecentFrame(lguaxxFrames);
-
-            if (lastLoxx && lastLguaxx) {
-                const loxxTime = new Date(lastLoxx.timestamp).getTime();
-                const lguaxxTime = new Date(lastLguaxx.timestamp).getTime();
-                lastFrame = loxxTime > lguaxxTime ? lastLoxx : lastLguaxx;
-            } else {
-                lastFrame = lastLoxx || lastLguaxx;
-            }
-            console.log('[VisorNuevo] Último frame (ambos):', lastFrame);
-        }
-
-        if (!lastFrame) {
-            console.log('[VisorNuevo] No hay último frame disponible');
+        // Usar el frame actual del slider/reproducción
+        if (!currentFrame) {
+            console.log('[VisorNuevo] No hay frame actual para mostrar hora');
             return null;
         }
 
-        console.log('[VisorNuevo] Filename del último frame:', lastFrame.filename);
+        console.log('[VisorNuevo] Mostrando hora del frame actual:', currentFrame.filename);
 
-        // Intentar extraer del filename
-        const filenameTime = extractTimeFromFilename(lastFrame.filename);
-        console.log('[VisorNuevo] Tiempo extraído del filename:', filenameTime);
+        const frameTimestamp = currentFrame.metadata?.sourceTimestamp || currentFrame.timestamp;
+        if (frameTimestamp) {
+            // Timestamp del frame (en UTC desde la BD)
+            const utcDate = new Date(frameTimestamp);
 
-        if (filenameTime) {
-            return `${filenameTime.year}-${filenameTime.month}-${filenameTime.day} ${filenameTime.hour}:${filenameTime.minute} LT`;
-        }
+            // UTC = Hora original del archivo (UTC)
+            const utcYear = utcDate.getUTCFullYear();
+            const utcMonth = String(utcDate.getUTCMonth() + 1).padStart(2, '0');
+            const utcDay = String(utcDate.getUTCDate()).padStart(2, '0');
+            const utcHour = String(utcDate.getUTCHours()).padStart(2, '0');
+            const utcMinute = String(utcDate.getUTCMinutes()).padStart(2, '0');
 
-        // Fallback: usar timestamp (convertir UTC a local)
-        const lastTimestamp = lastFrame.metadata?.sourceTimestamp || lastFrame.timestamp;
-        console.log('[VisorNuevo] Fallback timestamp:', lastTimestamp);
-
-        if (lastTimestamp) {
-            const utcDate = new Date(lastTimestamp);
+            // LT = Hora local Ecuador del frame (UTC-5)
+            // Convertir UTC a hora local Ecuador
             const ecuadorMs = utcDate.getTime() - (5 * 60 * 60 * 1000);
             const ecuadorDate = new Date(ecuadorMs);
-            const year = ecuadorDate.getUTCFullYear();
-            const month = String(ecuadorDate.getUTCMonth() + 1).padStart(2, '0');
-            const day = String(ecuadorDate.getUTCDate()).padStart(2, '0');
-            const hour = String(ecuadorDate.getUTCHours()).padStart(2, '0');
-            const minute = String(ecuadorDate.getUTCMinutes()).padStart(2, '0');
-            return `${year}-${month}-${day} ${hour}:${minute} LT`;
+
+            const ltYear = ecuadorDate.getUTCFullYear();
+            const ltMonth = String(ecuadorDate.getUTCMonth() + 1).padStart(2, '0');
+            const ltDay = String(ecuadorDate.getUTCDate()).padStart(2, '0');
+            const ltHour = String(ecuadorDate.getUTCHours()).padStart(2, '0');
+            const ltMinute = String(ecuadorDate.getUTCMinutes()).padStart(2, '0');
+
+            return {
+                lt: `${ltYear}-${ltMonth}-${ltDay} ${ltHour}:${ltMinute} LT`,
+                utc: `${utcYear}-${utcMonth}-${utcDay} ${utcHour}:${utcMinute} UTC`
+            };
         }
 
         return null;
@@ -381,8 +385,16 @@ const VisorNuevo = () => {
 
     return (
         <div className="visor-container">
-            {/* Sidebar arrastrablé */}
-            <VisorSidebar />
+            {/* Overlay oscuro en móvil cuando sidebar está abierto */}
+            {isSidebarOpen && (
+                <div
+                    className="fixed inset-0 bg-black/50 z-20 md:hidden"
+                    onClick={() => setIsSidebarOpen(false)}
+                />
+            )}
+
+            {/* Sidebar arrastrable */}
+            <VisorSidebar isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
 
             {/* Header profesional con fecha y botón recargar integrados */}
             <VisorHeader
@@ -390,24 +402,29 @@ const VisorNuevo = () => {
                 setLguaxxToggle={setShowLguaxx}
                 loxxToggle={showLoxx}
                 setLoxxToggle={setShowLoxx}
-                localTime={localEcuadorTime}
                 radarTime={radarCaptureTime}
                 onReload={loadFrames}
                 loading={loading}
+                timeInterval={timeInterval}
+                setTimeInterval={setTimeInterval}
+                playbackSpeed={playbackSpeed}
+                setPlaybackSpeed={setPlaybackSpeed}
+                isSidebarOpen={isSidebarOpen}
+                setIsSidebarOpen={setIsSidebarOpen}
             />
 
             <div className="visor-map">
                 {loading ? (
                     <div className="loading-overlay"> Cargando...</div>
                 ) : (
-                    <MapContainer center={[-4.0, -79.5]} zoom={7} style={{ width: '100%', height: '100%' }}>
+                    <MapContainer center={[-4.0, -79.5]} zoom={9} style={{ width: '100%', height: '100%' }}>
                         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
                         {/* Círculo de cobertura LGUAXX (azul/morado) */}
                         {showLguaxx && (
                             <Circle
-                                center={[-4.040, -79.869]} // Centro real basado en bounds de LGUAXX
-                                radius={100000} // 100 km de radio
+                                center={[-4.036, -79.872]} // Coordenadas oficiales GUAXX (Celica)
+                                radius={100000} // 100 km de radio (oficial)
                                 pathOptions={{
                                     color: '#6366f1',
                                     fillOpacity: 0,
@@ -420,8 +437,8 @@ const VisorNuevo = () => {
                         {/* Círculo de cobertura LOXX (verde) */}
                         {showLoxx && (
                             <Circle
-                                center={[-3.996, -79.206]} // Centro real basado en bounds de LOXX
-                                radius={100000} // 100 km de radio
+                                center={[-3.987, -79.144]} // Coordenadas oficiales LOXX (Loja)
+                                radius={70000} // 70 km de radio (oficial)
                                 pathOptions={{
                                     color: '#10b981',
                                     fillOpacity: 0,
@@ -452,6 +469,67 @@ const VisorNuevo = () => {
                         )}
                     </MapContainer>
                 )}
+
+                {/* Selector de intervalo draggable */}
+                <div
+                    style={{
+                        position: 'absolute',
+                        bottom: '60px',
+                        right: '20px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                        backdropFilter: 'blur(5px)',
+                        padding: '12px 16px',
+                        borderRadius: '8px',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                        zIndex: 1000,
+                        cursor: 'move',
+                        userSelect: 'none'
+                    }}
+                    draggable
+                    onDragStart={(e) => {
+                        e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDrag={(e) => {
+                        if (e.clientX === 0 && e.clientY === 0) return;
+                        const target = e.currentTarget;
+                        target.style.left = `${e.clientX - 80}px`;
+                        target.style.top = `${e.clientY - 40}px`;
+                        target.style.right = 'auto';
+                        target.style.bottom = 'auto';
+                    }}
+                >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <label style={{
+                            fontSize: '11px',
+                            fontWeight: '600',
+                            color: '#4b5563',
+                            textTransform: 'uppercase',
+                            letterSpacing: '0.5px'
+                        }}>
+                            Intervalo:
+                        </label>
+                        <select
+                            value={timeInterval}
+                            onChange={(e) => setTimeInterval(e.target.value)}
+                            style={{
+                                padding: '6px 10px',
+                                fontSize: '13px',
+                                border: '1px solid #d1d5db',
+                                borderRadius: '4px',
+                                outline: 'none',
+                                backgroundColor: 'white',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <option value="">Todo el día</option>
+                            <option value="1">1h</option>
+                            <option value="3">3h</option>
+                            <option value="6">6h</option>
+                            <option value="12">12h</option>
+                            <option value="24">24h</option>
+                        </select>
+                    </div>
+                </div>
             </div>
 
             <div className="visor-footer">
@@ -473,8 +551,8 @@ const VisorNuevo = () => {
                     </button>
                 </div>
 
-                {/* Control de velocidad */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {/* Control de velocidad - Solo en Desktop (oculto en móvil) */}
+                <div className="hidden md:flex" style={{ alignItems: 'center', gap: '12px' }}>
                     <span style={{ fontSize: '14px', fontWeight: '600', color: '#6b7280' }}>
                         Velocidad:
                     </span>

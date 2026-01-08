@@ -66,10 +66,15 @@ class PNGSyncService {
 
   /**
    * Extrae timestamp del nombre de archivo
+   * CORRECCIÓN: LOXX filenames están en hora LOCAL del radar (UTC-5),
+   * LGUAXX filenames están en UTC.
+   * Necesitamos detectar el radar y convertir apropiadamente.
    */
   extractTimestamp(filename, date) {
     try {
-      const match = filename.match(/(\d{8})_(\d{6})/);
+      // Formato: LGUAXX_2026010402150000dBuZ.png o LOXX_20260107_183501.png
+      // Capturar: YYYYMMDD (8) + HHMMSS (6)
+      const match = filename.match(/(\d{8})(\d{6})/);
       if (match) {
         const dateStr = match[1];
         const timeStr = match[2];
@@ -79,13 +84,31 @@ class PNGSyncService {
         const hour = timeStr.substring(0, 2);
         const minute = timeStr.substring(2, 4);
         const second = timeStr.substring(4, 6);
-        return new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+
+        // Detectar si es LOXX (hora local) o LGUAXX (UTC)
+        const isLoxx = filename.toUpperCase().startsWith('LOXX');
+
+        if (isLoxx) {
+          // LOXX: filename en hora LOCAL Ecuador (UTC-5)
+          // Crear fecha en hora local y luego convertir a UTC
+          const localDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}`);
+          // Sumar 5 horas para convertir de Ecuador Local Time a UTC
+          const utcTimestamp = new Date(localDate.getTime() + (5 * 60 * 60 * 1000));
+          console.log(`[extractTimestamp] LOXX: ${filename} → Local: ${localDate.toISOString()} → UTC: ${utcTimestamp.toISOString()}`);
+          return utcTimestamp;
+        } else {
+          // LGUAXX: filename ya está en UTC
+          const utcTimestamp = new Date(`${year}-${month}-${day}T${hour}:${minute}:${second}Z`);
+          console.log(`[extractTimestamp] LGUAXX: ${filename} → UTC: ${utcTimestamp.toISOString()}`);
+          return utcTimestamp;
+        }
       }
       if (date) {
         return new Date(`${date}T12:00:00Z`);
       }
       return new Date();
     } catch (error) {
+      console.error(`[extractTimestamp] Error parsing ${filename}:`, error);
       return new Date();
     }
   }
