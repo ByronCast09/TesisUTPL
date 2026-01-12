@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import VisorHeader from '../components/VisorHeader';
 import VisorSidebar from '../components/VisorSidebar';
 import { getAvailableDates, getPngsFromDb } from '../services/radarService';
@@ -22,6 +22,19 @@ const FitBoundsOnOverlay = ({ bounds }) => {
       }
     }
   }, [bounds, map]);
+  return null;
+};
+
+// Componente para capturar la instancia del mapa Leaflet
+const MapInstanceCapture = ({ mapRef }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (map && mapRef) {
+      mapRef.current = map;
+    }
+  }, [map, mapRef]);
+
   return null;
 };
 
@@ -623,7 +636,9 @@ const DatosHistoricos = () => {
 
                   {/* Mapa Interactivo */}
                   <div className="mb-4">
-                    <div className="h-[400px] w-full border border-gray-200 rounded-lg overflow-hidden relative">
+                    <div
+                      className="h-[400px] w-full border border-gray-200 rounded-lg overflow-hidden relative"
+                    >
                       {radarImages.length > 0 && radarImages[currentImageIndex] ? (
                         <MapContainer
                           key={`map - ${currentImageIndex} -${radarImages[currentImageIndex].url} `}
@@ -641,8 +656,8 @@ const DatosHistoricos = () => {
                           {/* Círculo de cobertura basado en el radar actual (solo borde) */}
                           {radarImages[currentImageIndex]?.radar === 'GUAXX' && (
                             <Circle
-                              center={[-4.040, -79.869]}
-                              radius={100000}
+                              center={[-4.036, -79.872]} // ✓ Coordenadas correctas GUAXX (Celica)
+                              radius={100000} // 100 km de radio (oficial)
                               pathOptions={{
                                 color: '#6366f1',
                                 fillColor: 'transparent',
@@ -655,8 +670,8 @@ const DatosHistoricos = () => {
 
                           {radarImages[currentImageIndex]?.radar === 'LOXX' && (
                             <Circle
-                              center={[-3.996, -79.206]}
-                              radius={100000}
+                              center={[-3.987, -79.144]} // ✓ Coordenadas correctas LOXX (Loja)
+                              radius={70000} // 70 km de radio (oficial, corregido de 100km)
                               pathOptions={{
                                 color: '#10b981',
                                 fillColor: 'transparent',
@@ -741,8 +756,12 @@ const DatosHistoricos = () => {
                           // Generar nombre de archivo
                           const filename = `${currentImage.radar}_${selectedDate}_${currentImage.time.replace(':', '')}.png`;
 
-                          // Descargar con marca de agua
-                          await downloadWatermarkedImage(currentImage.url, filename, metadata);
+                          // Descargar con mapa simple
+                          await downloadWatermarkedImage(
+                            currentImage.url,
+                            filename,
+                            metadata
+                          );
                         } catch (error) {
                           console.error('Error al descargar imagen:', error);
                           alert('Error al generar la imagen. Intentando descarga directa...');
@@ -756,7 +775,7 @@ const DatosHistoricos = () => {
                       className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
                     >
                       <Download className="w-4 h-4" />
-                      Descargar
+                      Descargar con Mapa
                     </button>
                   </div>
 

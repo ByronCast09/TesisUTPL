@@ -6,16 +6,38 @@ const VisorHeader = ({
   setLguaxxToggle,
   loxxToggle,
   setLoxxToggle,
-  displayDate,
+  radarTime,
   onReload,
-  loading
+  loading,
+  timeInterval,
+  setTimeInterval,
+  playbackSpeed,
+  setPlaybackSpeed,
+  isSidebarOpen,
+  setIsSidebarOpen
 }) => {
   return (
-    <header className="w-full px-4 sm:px-6 lg:px-10 xl:px-20 py-4 bg-white shadow-md z-30 relative">
+    <header className="w-full px-2 py-2 md:px-4 md:py-4 lg:px-10 xl:px-20 bg-white shadow-md z-30 relative">
       <div className="flex items-center justify-between">
-        {/* Logo */}
-        <div className="flex items-center">
-          <h1 className="text-[24px] sm:text-[32px] lg:text-[48px] font-poppins font-semibold leading-[36px] sm:leading-[48px] lg:leading-[72px] text-global-1">
+        {/* Logo + Hamburger (móvil) */}
+        <div className="flex items-center gap-3">
+          {/* Botón Hamburguesa - Solo móvil */}
+          <button
+            onClick={() => setIsSidebarOpen && setIsSidebarOpen(!isSidebarOpen)}
+            className="md:hidden p-2 rounded-md hover:bg-gray-100 transition-colors"
+            aria-label="Menú"
+          >
+            <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              {isSidebarOpen ? (
+                // Icono X cuando está abierto
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                // Icono hamburguesa cuando está cerrado
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              )}
+            </svg>
+          </button>
+          <h1 className="text-[18px] md:text-[24px] lg:text-[48px] font-poppins font-semibold leading-[24px] md:leading-[36px] lg:leading-[72px] text-global-1">
             UTPL
           </h1>
         </div>
@@ -36,8 +58,8 @@ const VisorHeader = ({
           </Link>
         </nav>
 
-        {/* Right side controls */}
-        <div className="flex items-center space-x-4 lg:space-x-6">
+        {/* Right side controls - Hidden on mobile */}
+        <div className="hidden md:flex items-center space-x-4 lg:space-x-6">
           <img
             src="/images/img_mdi_account_alert_outline.svg"
             alt="Account"
@@ -55,63 +77,109 @@ const VisorHeader = ({
       </div>
 
       {/* Toggle Switches and Date/Reload (Segunda fila) */}
-      <div className="flex items-center justify-between mt-4">
-        {/* Fecha (izquierda) - solo si displayDate está presente */}
-        {displayDate && (
-          <div className="flex items-center">
-            <p className="text-sm font-medium text-gray-700">
-              📅 {displayDate}
-            </p>
-          </div>
-        )}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between mt-1 md:mt-4 gap-2">
+        {/* Fechas (izquierda) - Compacto en móvil */}
+        <div className="flex flex-col text-xs md:text-sm">
+          {radarTime && (() => {
+            // Calcular tiempo relativo (hace X min)
+            const now = new Date();
+            const utcString = radarTime.utc.replace(' UTC', '').replace(' ', 'T') + ':00Z';
+            const captureTime = new Date(utcString);
+            const diffMs = now - captureTime;
+            const diffMinutes = Math.floor(diffMs / 60000);
+
+            let relativeTime = '';
+            if (diffMinutes < 1) {
+              relativeTime = 'hace 0min';
+            } else if (diffMinutes < 60) {
+              relativeTime = `hace ${diffMinutes}min`;
+            } else {
+              const diffHours = Math.floor(diffMinutes / 60);
+              relativeTime = `hace ${diffHours}h${diffMinutes % 60}min`;
+            }
+
+            return (
+              <div className="text-gray-600">
+                <p className="hidden md:block">⏰ Última captura:</p>
+                <p className="font-medium">
+                  <span className="md:hidden">⏰ </span>
+                  {radarTime.lt} • {relativeTime}
+                </p>
+              </div>
+            );
+          })()}
+        </div>
 
         {/* Toggle Switches (centro-derecha) */}
-        <div className="flex items-center space-x-6 ml-auto">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium text-gray-700">GUAXX</span>
+        <div className="flex flex-wrap items-center gap-2 md:space-x-6 md:ml-auto">
+          <div className="flex items-center space-x-1">
+            <span className="text-xs md:text-sm font-medium text-gray-700">GUAXX</span>
             <button
               onClick={() => setLguaxxToggle(!lguaxxToggle)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${lguaxxToggle ? 'bg-purple-500' : 'bg-gray-300'
+              className={`relative inline-flex h-5 w-9 md:h-6 md:w-11 items-center rounded-full transition-colors ${lguaxxToggle ? 'bg-purple-500' : 'bg-gray-300'
                 }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${lguaxxToggle ? 'translate-x-6' : 'translate-x-1'
+                className={`inline-block h-3 w-3 md:h-4 md:w-4 transform rounded-full bg-white transition-transform ${lguaxxToggle ? 'translate-x-5 md:translate-x-6' : 'translate-x-1'
                   }`}
               />
             </button>
-            <div className="w-4 h-4 bg-purple-500 rounded"></div>
+            <div className="w-3 h-3 md:w-4 md:h-4 bg-purple-500 rounded"></div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium text-gray-700">LOXX</span>
+          <div className="flex items-center space-x-1">
+            <span className="text-xs md:text-sm font-medium text-gray-700">LOXX</span>
             <button
               onClick={() => setLoxxToggle(!loxxToggle)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${loxxToggle ? 'bg-green-500' : 'bg-gray-300'
+              className={`relative inline-flex h-5 w-9 md:h-6 md:w-11 items-center rounded-full transition-colors ${loxxToggle ? 'bg-green-500' : 'bg-gray-300'
                 }`}
             >
               <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${loxxToggle ? 'translate-x-6' : 'translate-x-1'
+                className={`inline-block h-3 w-3 md:h-4 md:w-4 transform rounded-full bg-white transition-transform ${loxxToggle ? 'translate-x-5 md:translate-x-6' : 'translate-x-1'
                   }`}
               />
             </button>
-            <div className="w-4 h-4 bg-green-500 rounded"></div>
+            <div className="w-3 h-3 md:w-4 md:h-4 bg-green-500 rounded"></div>
           </div>
 
-          {/* Botón Recargar - solo si onReload está presente */}
+          {/* Botón Recargar - compacto en móvil */}
           {onReload && (
             <button
               onClick={onReload}
               disabled={loading}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-all ${loading
-                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                  : 'bg-blue-500 text-white hover:bg-blue-600'
+              className={`px-2 py-1 md:px-4 md:py-2 text-xs md:text-sm font-medium rounded-md transition-all ${loading
+                ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                : 'bg-blue-500 text-white hover:bg-blue-600'
                 }`}
             >
-              {loading ? '⏳ Cargando...' : '🔄 Recargar'}
+              {loading ? (window.innerWidth < 768 ? '⏳' : '⏳ Cargando...') : (window.innerWidth < 768 ? '🔄' : '🔄 Recargar')}
             </button>
           )}
+
+
         </div>
       </div>
+
+      {/* Tercera fila - Control de Velocidad SOLO en Móvil - MÁS COMPACTO */}
+      {playbackSpeed !== undefined && setPlaybackSpeed && (
+        <div className="flex md:hidden items-center justify-center mt-1 pb-1">
+          <div className="flex items-center space-x-2 px-3 py-1 bg-gray-50 rounded border border-gray-200">
+            <span className="text-xs font-medium text-gray-700 whitespace-nowrap">Vel:</span>
+            <input
+              type="range"
+              min="0.25"
+              max="4"
+              step="0.25"
+              value={playbackSpeed}
+              onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+              className="w-20"
+            />
+            <span className="text-xs font-bold text-gray-900 min-w-[28px] text-center">
+              {playbackSpeed}x
+            </span>
+          </div>
+        </div>
+      )}
 
     </header>
   );

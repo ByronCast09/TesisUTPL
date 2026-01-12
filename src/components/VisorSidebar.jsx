@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { User } from 'lucide-react';
 
-const VisorSidebar = () => {
+const VisorSidebar = ({ isSidebarOpen, setIsSidebarOpen }) => {
   const location = useLocation();
   const [sidebarPosition, setSidebarPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -20,15 +20,17 @@ const VisorSidebar = () => {
 
   const activeMenu = getActiveMenu();
 
-  // Handlers para arrastrar el sidebar
+  // Handlers para arrastrar el sidebar (soporte mouse + touch)
   const handleMouseDown = (e) => {
     if (e.target.closest('a, button, nav')) return;
     setIsDragging(true);
     if (sidebarRef.current) {
       const rect = sidebarRef.current.getBoundingClientRect();
+      const clientX = e.clientX || (e.touches?.[0]?.clientX);
+      const clientY = e.clientY || (e.touches?.[0]?.clientY);
       setDragOffset({
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
+        x: clientX - rect.left,
+        y: clientY - rect.top
       });
     }
   };
@@ -36,9 +38,11 @@ const VisorSidebar = () => {
   useEffect(() => {
     const handleMouseMove = (e) => {
       if (!isDragging) return;
+      const clientX = e.clientX || (e.touches?.[0]?.clientX);
+      const clientY = e.clientY || (e.touches?.[0]?.clientY);
       setSidebarPosition({
-        x: e.clientX - dragOffset.x,
-        y: e.clientY - dragOffset.y
+        x: clientX - dragOffset.x,
+        y: clientY - dragOffset.y
       });
     };
 
@@ -47,27 +51,35 @@ const VisorSidebar = () => {
     };
 
     if (isDragging) {
+      // Mouse events
       document.addEventListener('mousemove', handleMouseMove);
       document.addEventListener('mouseup', handleMouseUp);
+      // Touch events para móviles
+      document.addEventListener('touchmove', handleMouseMove, { passive: false });
+      document.addEventListener('touchend', handleMouseUp);
     }
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('touchmove', handleMouseMove);
+      document.removeEventListener('touchend', handleMouseUp);
     };
   }, [isDragging, dragOffset]);
 
   return (
     <aside
       ref={sidebarRef}
-      className="absolute w-64 z-30 flex flex-col backdrop-blur-[18px] bg-[rgba(255,255,255,0.55)] shadow-2xl rounded-lg overflow-hidden cursor-move"
+      className={`${isSidebarOpen ? 'flex' : 'hidden'} md:flex absolute w-64 z-30 flex-col backdrop-blur-[18px] bg-[rgba(255,255,255,0.55)] shadow-2xl rounded-lg overflow-hidden cursor-move`}
       style={{
         left: `${sidebarPosition.x || 20}px`,
         top: `${sidebarPosition.y || 230}px`,
         maxHeight: 'calc(100vh - 140px)',
-        userSelect: 'none'
+        userSelect: 'none',
+        touchAction: 'none' // Prevenir scroll mientras se arrastra
       }}
       onMouseDown={handleMouseDown}
+      onTouchStart={handleMouseDown}
     >
       {/* Window Panel Header */}
       <div className="px-4 py-3 flex items-center justify-between border-b border-gray-300/30 bg-white/10">
@@ -91,8 +103,8 @@ const VisorSidebar = () => {
         <Link
           to="/visor"
           className={`flex items-center px-4 py-3 mb-1 rounded-lg transition-all duration-200 ${activeMenu === 'visor'
-              ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
-              : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
+            ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
+            : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
             }`}
         >
           <span>Visor</span>
@@ -100,8 +112,8 @@ const VisorSidebar = () => {
         <Link
           to="/datos-historicos"
           className={`flex items-center px-4 py-3 mb-1 rounded-lg transition-all duration-200 ${activeMenu === 'datos-historicos'
-              ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
-              : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
+            ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
+            : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
             }`}
         >
           <span>Datos Históricos</span>
@@ -109,8 +121,8 @@ const VisorSidebar = () => {
         <Link
           to="/analisis-graficos"
           className={`flex items-center px-4 py-3 mb-1 rounded-lg transition-all duration-200 ${activeMenu === 'analisis-graficos'
-              ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
-              : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
+            ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
+            : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
             }`}
         >
           <span>Análisis Gráficos</span>
@@ -118,8 +130,8 @@ const VisorSidebar = () => {
         <Link
           to="/soporte"
           className={`flex items-center px-4 py-3 mb-1 rounded-lg transition-all duration-200 ${activeMenu === 'soporte'
-              ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
-              : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
+            ? 'bg-[#EBF4FF] text-[#3C4043] font-medium border-l-4 border-[#4285F4]'
+            : 'text-gray-700 hover:text-[#3272CA] hover:bg-white/40'
             }`}
         >
           <span>Soporte</span>
@@ -128,20 +140,44 @@ const VisorSidebar = () => {
 
       {/* Legend */}
       <div className="px-4 py-3 border-t border-gray-300/30" onMouseDown={(e) => e.stopPropagation()}>
-        <div className="space-y-2">
+        <h4 className="text-xs font-semibold text-gray-800 mb-3">Intensidad de Precipitación</h4>
+        <div className="space-y-1.5">
           <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: 'rgb(0, 255, 0)' }}></div>
-            <span className="text-xs text-gray-700">Ligera</span>
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#00FFFF' }}></div>
+            <span className="text-xs text-gray-700">Muy Ligera (8-16 dBZ)</span>
           </div>
           <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: 'rgb(255, 255, 0)' }}></div>
-            <span className="text-xs text-gray-700">Moderada</span>
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#0080FF' }}></div>
+            <span className="text-xs text-gray-700">Ligera (16-24 dBZ)</span>
           </div>
           <div className="flex items-center space-x-2">
-            <div className="w-4 h-4 rounded-full" style={{ backgroundColor: 'rgb(255, 50, 0)' }}></div>
-            <span className="text-xs text-gray-700">Fuerte</span>
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#0000FF' }}></div>
+            <span className="text-xs text-gray-700">Moderada (24-32 dBZ)</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#00FF00' }}></div>
+            <span className="text-xs text-gray-700">Fuerte (32-40 dBZ)</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#FFFF00' }}></div>
+            <span className="text-xs text-gray-700">Muy Fuerte (48-56 dBZ)</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#FF8000' }}></div>
+            <span className="text-xs text-gray-700">Intensa (56-64 dBZ)</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#FF0000' }}></div>
+            <span className="text-xs text-gray-700">Muy Intensa (64-72 dBZ)</span>
+          </div>
+          <div className="flex items-center space-x-2">
+            <div className="w-4 h-4 rounded-sm" style={{ backgroundColor: '#FF00FF' }}></div>
+            <span className="text-xs text-gray-700">Extrema (&gt;72 dBZ)</span>
           </div>
         </div>
+        <p className="text-[10px] text-gray-500 mt-2 italic">
+          dBZ = Reflectividad del radar
+        </p>
       </div>
 
       {/* User Profile */}

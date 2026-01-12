@@ -135,55 +135,67 @@
     image-rendering: crisp-edges;
 }
 
-/* Animación de entrada suave más larga para crossfade */
-@keyframes fadeIn {
-    0% {
-        opacity: 0;
-    }
-
-    100% {
-        opacity: 1;
-    }
-}
-
 /* Aplicar a overlays de radar - transición fluida tipo video */
 .leaflet-overlay-pane {
     transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .leaflet-overlay-pane img {
-    animation: fadeIn 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    will-change: opacity;
+    /* Optimizaciones de rendering sin will-change para evitar degradación */
     backface-visibility: hidden;
     -webkit-backface-visibility: hidden;
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
 }
 
 /* 🎚️ Control deslizante de velocidad */
 input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
-    background: transparent;
+    width: 120px;
+    height: 8px;
+    background: #e5e7eb;
+    border-radius: 4px;
+    outline: none;
     cursor: pointer;
+    /* 📱 Soporte táctil mejorado para móviles */
+    touch-action: none;
+    /* Permite manipulación directa del slider */
+    -webkit-tap-highlight-color: transparent;
+    /* Quita el resaltado azul en iOS */
 }
 
 input[type="range"]::-webkit-slider-track {
     background: #e5e7eb;
-    height: 6px;
-    border-radius: 3px;
+    height: 8px;
+    /* Aumentado de 6px para mejor toque en móvil */
+    border-radius: 4px;
 }
 
 input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     background: #3b82f6;
-    height: 18px;
-    width: 18px;
+    height: 24px;
+    /* Aumentado de 18px para mejor toque */
+    width: 24px;
+    /* Aumentado de 18px para mejor toque */
     border-radius: 50%;
-    border: 2px solid white;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    margin-top: -6px;
+    border: 3px solid white;
+    /* Más visible */
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    margin-top: -8px;
+    /* Ajustado para el nuevo tamaño */
+    cursor: grab;
+}
+
+input[type="range"]:active::-webkit-slider-thumb {
+    cursor: grabbing;
+    transform: scale(1.15);
+    /* Feedback visual al tocar */
+    background: #2563eb;
 }
 
 input[type="range"]::-webkit-slider-thumb:hover {
@@ -193,20 +205,45 @@ input[type="range"]::-webkit-slider-thumb:hover {
 
 input[type="range"]::-moz-range-track {
     background: #e5e7eb;
-    height: 6px;
-    border-radius: 3px;
+    height: 8px;
+    /* Aumentado para mejor toque */
+    border-radius: 4px;
 }
 
 input[type="range"]::-moz-range-thumb {
     background: #3b82f6;
-    height: 18px;
-    width: 18px;
+    height: 24px;
+    /* Aumentado para mejor toque */
+    width: 24px;
+    /* Aumentado para mejor toque */
     border-radius: 50%;
-    border: 2px solid white;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    border: 3px solid white;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    cursor: grab;
+}
+
+input[type="range"]:active::-moz-range-thumb {
+    cursor: grabbing;
+    transform: scale(1.15);
+    background: #2563eb;
 }
 
 input[type="range"]::-moz-range-thumb:hover {
     background: #2563eb;
     transform: scale(1.1);
+}
+
+/* 📱 Estilos específicos para móviles */
+@media (hover: none) and (pointer: coarse) {
+    input[type="range"]::-webkit-slider-thumb {
+        height: 28px;
+        /* Aún más grande en móviles */
+        width: 28px;
+        margin-top: -10px;
+    }
+
+    input[type="range"]::-moz-range-thumb {
+        height: 28px;
+        width: 28px;
+    }
 }

@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
-const ORIGIN_URL = API_URL.replace(/\/api\/?$/, '');
+// Usar rutas relativas para que funcione tanto en localhost como en ngrok
+const API_URL = '/api';
+const ORIGIN_URL = '';
 
 /**
  * Obtiene los datos actuales de los radares
