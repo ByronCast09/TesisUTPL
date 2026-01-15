@@ -12,14 +12,91 @@ from pathlib import Path
 from datetime import datetime
 import subprocess
 
+import re
+
 # Configuración
 INPUT_DIR = r"F:\LOXX\H5"
 OUTPUT_DIR = r"F:\LOXX\PNG_OUTPUT"
 PROCESSOR_SCRIPT = r"C:\Users\Usuario iTC\Desktop\TesisUTPL\tesis_utpl\backend\scripts\process_loxx_h5_compressed.py"
 STATE_FILE = r"C:\Users\Usuario iTC\Desktop\TesisUTPL\loxx_polling_state.json"
 
-POLL_INTERVAL = 30  # segundos entre revisiones
-MAX_FILES_PER_CYCLE = 10  # procesar máximo 10 archivos por ciclo
+POLL_INTERVAL = 10  # Más rápido
+MAX_FILES_PER_CYCLE = 50  # Más archivos por ciclo para catch-up rápido
+START_DATE_FILTER = 20260107 # Procesar desde el 7 de Enero en adelante
+
+# ... (load_state, save_state functions remain same) ...
+
+# Función auxiliar para extraer fecha
+def extract_date(filename):
+    match = re.search(r'(202[0-9]{5})', filename)
+    return int(match.group(1)) if match else 0
+
+def find_h5_files(directory):
+    """Encuentra archivos H5 comprimidos y filtra por fecha"""
+    h5_files = []
+    
+    try:
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                if file.endswith('.h5.gz') or file.endswith('.h5.zip') or \
+                   (file.endswith('.gz') and '.h5' in file.lower()):
+                    
+                    # FILTRO DE FECHA
+                    file_date = extract_date(file)
+                    if file_date >= START_DATE_FILTER:
+                        full_path = os.path.join(root, file)
+                        h5_files.append(full_path)
+    except Exception as e:
+        print(f"Error escaneando directorio: {e}")
+    
+    return h5_files
+
+# ... (process_file remains same) ...
+
+import argparse
+
+def main():
+    parser = argparse.ArgumentParser(description='Monitor Radar LOXX con soporte Backfill')
+    parser.add_argument('--start-date', type=int, default=20260107, 
+                        help='Fecha de inicio para procesar (YYYYMMDD). Default: 20260107')
+    parser.add_argument('--limit', type=int, default=50, 
+                        help='Archivos por ciclo. Default: 50')
+    parser.add_argument('--interval', type=int, default=10, 
+                        help='Intervalo de polling (segundos). Default: 10')
+    
+    args = parser.parse_args()
+    
+    # Actualizar configuración global con argumentos
+    global START_DATE_FILTER, MAX_FILES_PER_CYCLE, POLL_INTERVAL
+    START_DATE_FILTER = args.start_date
+    MAX_FILES_PER_CYCLE = args.limit
+    POLL_INTERVAL = args.interval
+
+    print("="*70)
+    print("MONITOR LOXX - MODO CATCH-UP & LIVE")
+    print("="*70)
+    print(f"Directorio H5:   {INPUT_DIR}")
+    print(f"Inicio Proceso:  > {START_DATE_FILTER}")
+    print(f"Archivos/Ciclo:  {MAX_FILES_PER_CYCLE}")
+    print(f"Intervalo:       {POLL_INTERVAL}s")
+    print("Orden:           CRONOLÓGICO (Recuperando historia -> actual)")
+    print("="*70)
+    # ...
+
+    # ... (inside loop)
+            # Ordenar CRONOLÓGICAMENTE (Oldest first) para llenar historial
+            # Usamos el nombre del archivo que contiene la fecha YYYYMMDDHHMM
+            new_files.sort(key=lambda f: os.path.basename(f))
+                
+            # Procesar lote
+            to_process = new_files[:MAX_FILES_PER_CYCLE]
+                
+            if len(new_files) > MAX_FILES_PER_CYCLE:
+                print(f"  ⚠️ Hay {len(new_files)} pendientes. Procesando lote de {MAX_FILES_PER_CYCLE} antiguos...")
+                
+            for i, file_path in enumerate(to_process, 1):
+                print(f"\n  [{i}/{len(to_process)}] {os.path.basename(file_path)}")
+                # ...
 
 def load_state():
     """Carga el estado de archivos ya procesados"""
