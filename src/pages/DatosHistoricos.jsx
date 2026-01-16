@@ -55,6 +55,9 @@ const DatosHistoricos = () => {
   const [loxxIndex, setLoxxIndex] = useState({});
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [showRecordModal, setShowRecordModal] = useState(false);
+  const mapContainerRef = useRef(null);
+  const leafletMapRef = useRef(null);
+  const [showCircleOverlay, setShowCircleOverlay] = useState(true);
 
   // Cargar índices de ambos radares
   useEffect(() => {
@@ -345,9 +348,11 @@ const DatosHistoricos = () => {
           // Fallback de bounds
           if (!bounds) {
             if (radarId === 'LGUAXX') {
-              bounds = [[-4.944622, -80.770709], [-3.136104, -78.967612]];
+              // Celica: -4.036, -79.872, Radio 100km ~ 0.9 deg
+              bounds = [[-4.936, -80.772], [-3.136, -78.972]];
             } else {
-              bounds = [[-5.077081, -80.286881], [-2.914919, -78.124719]];
+              // LOXX: -3.9960, -79.2058, Radio ~120km ~ 1.08 deg
+              bounds = [[-5.076, -80.2858], [-2.916, -78.1258]];
             }
           }
 
@@ -637,6 +642,7 @@ const DatosHistoricos = () => {
                   {/* Mapa Interactivo */}
                   <div className="mb-4">
                     <div
+                      ref={mapContainerRef}
                       className="h-[400px] w-full border border-gray-200 rounded-lg overflow-hidden relative"
                     >
                       {radarImages.length > 0 && radarImages[currentImageIndex] ? (
@@ -647,17 +653,20 @@ const DatosHistoricos = () => {
                           style={{ height: '100%', width: '100%' }}
                           zoomControl={true}
                           scrollWheelZoom={true}
+                          whenReady={(mapInstance) => {
+                            leafletMapRef.current = mapInstance.target;
+                          }}
                         >
                           <TileLayer
                             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                           />
 
-                          {/* Círculo de cobertura basado en el radar actual (solo borde) */}
-                          {radarImages[currentImageIndex]?.radar === 'GUAXX' && (
+                          {showCircleOverlay && radarImages[currentImageIndex]?.radar === 'GUAXX' && (
                             <Circle
-                              center={[-4.036, -79.872]} // ✓ Coordenadas correctas GUAXX (Celica)
-                              radius={100000} // 100 km de radio (oficial)
+                              key={`guaxx-circle-${currentImageIndex}`}
+                              center={[-4.036, -79.872]} // Celica
+                              radius={100000} // 100 km
                               pathOptions={{
                                 color: '#6366f1',
                                 fillColor: 'transparent',
@@ -668,10 +677,10 @@ const DatosHistoricos = () => {
                             />
                           )}
 
-                          {radarImages[currentImageIndex]?.radar === 'LOXX' && (
+                          {showCircleOverlay && radarImages[currentImageIndex]?.radar === 'LOXX' && (
                             <Circle
-                              center={[-3.987, -79.144]} // ✓ Coordenadas correctas LOXX (Loja)
-                              radius={70000} // 70 km de radio (oficial, corregido de 100km)
+                              center={[-3.9960, -79.2058]} // ✓ Coordenadas correctas LOXX (UTPL)
+                              radius={120000} // 120 km de radio
                               pathOptions={{
                                 color: '#10b981',
                                 fillColor: 'transparent',
@@ -747,29 +756,70 @@ const DatosHistoricos = () => {
                         if (!currentImage) return;
 
                         try {
-                          // Preparar metadata para la marca de agua
+                          // 1. Ocultar el círculo SVG temporalmente (html2canvas no puede capturarlo correctamente)
+                          setShowCircleOverlay(false);
+                          await new Promise(resolve => setTimeout(resolve, 50)); // Esperar a que React re-renderice
+
+                          // 2. Guardar posición de scroll actual y mover al inicio
+                          const scrollX = window.scrollX;
+                          const scrollY = window.scrollY;
+                          window.scrollTo(0, 0);
+
+                          const element = mapContainerRef.current;
+
+                          // 3. Forzar a Leaflet a recalcular el tamaño del mapa
+                          if (leafletMapRef.current) {
+                            leafletMapRef.current.invalidateSize();
+                          }
+
+                          // 4. Esperar a que Leaflet termine de renderizar
+                          await new Promise(resolve => setTimeout(resolve, 200));
+
+                          let mapCanvas;
+                          try {
+                            mapCanvas = await import('html2canvas').then(m => m.default(element, {
+                              useCORS: true,
+                              allowTaint: true,
+                              logging: false,
+                              scrollX: 0,
+                              scrollY: 0,
+                              ignoreElements: (element) => {
+                                if (element.classList.contains('leaflet-control-container')) return true;
+                                const isButton = element.tagName === 'BUTTON';
+                                const isCounter = element.innerText && element.innerText.includes(' / ') && element.classList.contains('absolute');
+                                return isButton || isCounter;
+                              }
+                            }));
+                          } finally {
+                            window.scrollTo(scrollX, scrollY);
+                            setShowCircleOverlay(true); // Restaurar círculo
+                          }
+
+                          // 5. Convertir el mapa a una imagen (Data URL)
+                          const mapDataUrl = mapCanvas.toDataURL('image/png');
+
+                          // 6. Preparar metadatos para la marca de agua
                           const metadata = {
                             radar: currentImage.radar,
                             date: `${selectedDate} - ${currentImage.time}`,
                           };
 
-                          // Generar nombre de archivo
-                          const filename = `${currentImage.radar}_${selectedDate}_${currentImage.time.replace(':', '')}.png`;
+                          // 7. Generar nombre de archivo
+                          const filename = `${currentImage.radar}_${selectedDate}_${currentImage.time.replace(':', '')}_map.png`;
 
-                          // Descargar con mapa simple
+                          // 8. Pasar bounds para que el watermark service dibuje el círculo manualmente
+                          console.log('[DatosHistoricos] Enviando bounds:', currentImage.bounds);
+                          console.log('[DatosHistoricos] Radar:', currentImage.radar);
                           await downloadWatermarkedImage(
-                            currentImage.url,
+                            mapDataUrl,
                             filename,
-                            metadata
+                            metadata,
+                            currentImage.bounds // Pasar bounds para dibujar círculo geográficamente correcto
                           );
                         } catch (error) {
-                          console.error('Error al descargar imagen:', error);
-                          alert('Error al generar la imagen. Intentando descarga directa...');
-                          // Fallback: descarga directa sin marca de agua
-                          const link = document.createElement('a');
-                          link.href = currentImage.url;
-                          link.download = `${currentImage.radar}_${selectedDate}_${currentImage.time.replace(':', '')}.png`;
-                          link.click();
+                          console.error('Error al descargar imagen con mapa:', error);
+                          alert('Error al generar la imagen con mapa: ' + error.message);
+                          setShowCircleOverlay(true); // Restaurar círculo en caso de error
                         }
                       }}
                       className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded-md hover:bg-gray-700 transition-colors"
