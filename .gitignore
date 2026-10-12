@@ -30,3 +30,5 @@ jest-test-results.json
 .env
 backend/.env
 backend/firebase-key.json
+
+.env*
