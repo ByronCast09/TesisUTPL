@@ -1,15 +1,8 @@
 {
+  "buildCommand": "VITE_DEMO_MODE=true vite build",
+  "outputDirectory": "dist",
   "rewrites": [
-    {
-      "source": "/(.*)",
-      "destination": "/index.html"
-    }
-  ],
-  "outputDirectory": "build",
-  "experimentalServices": {
-    "frontend": {
-      "routePrefix": "/",
-      "framework": "vite"
-    }
-  }
+    { "source": "/api/radar/pngs/:id/image", "destination": "/demo/radar/:id.png" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

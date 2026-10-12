@@ -25,3 +25,8 @@ jest-test-results.json
 .vscode/
 .idea/
 .vercel
+
+# Secretos locales
+.env
+backend/.env
+backend/firebase-key.json
